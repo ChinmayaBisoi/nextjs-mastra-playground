@@ -2,7 +2,7 @@
 
 import "@/app/globals.css";
 import { useEffect, useState } from "react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage, type ToolUIPart } from "ai";
 import { useChat } from "@ai-sdk/react";
 
 import {
@@ -48,8 +48,8 @@ function Chat() {
           console.error("Failed to fetch messages:", res.statusText);
           return;
         }
-        const data = await res.json();
-        setMessages([...data]);
+        const data = (await res.json()) as UIMessage[];
+        setMessages(data);
       } catch (error) {
         console.error("Error fetching messages:", error);
       }
@@ -69,9 +69,9 @@ function Chat() {
       <div className="flex flex-col h-full">
         <Conversation className="h-full">
           <ConversationContent>
-            {messages.map((message: any) => (
+            {messages.map((message: UIMessage) => (
               <div key={message.id}>
-                {message.parts?.map((part: any, i: number) => {
+                {message.parts?.map((part, i: number) => {
                   if (part.type === "text") {
                     return (
                       <Message key={`${message.id}-${i}`} from={message.role}>
@@ -82,19 +82,26 @@ function Chat() {
                     );
                   }
 
-                  if (part.type?.startsWith("tool-")) {
+                  if (
+                    part.type === "tool-call" ||
+                    part.type === "tool-result" ||
+                    part.type === "tool-error" ||
+                    (typeof part.type === "string" &&
+                      part.type.startsWith("tool-"))
+                  ) {
+                    const toolPart = part as ToolUIPart;
                     return (
                       <Tool key={`${message.id}-${i}`}>
                         <ToolHeader
-                          type={part.type}
-                          state={part.state || "output-available"}
+                          type={toolPart.type}
+                          state={toolPart.state || "output-available"}
                           className="cursor-pointer"
                         />
                         <ToolContent>
-                          <ToolInput input={part.input || part.args || {}} />
+                          <ToolInput input={toolPart.input || {}} />
                           <ToolOutput
-                            output={part.output || part.result}
-                            errorText={part.errorText || part.error}
+                            output={toolPart.output}
+                            errorText={toolPart.errorText}
                           />
                         </ToolContent>
                       </Tool>
@@ -112,7 +119,7 @@ function Chat() {
         <PromptInput onSubmit={handleSubmit} className="mt-20">
           <PromptInputBody>
             <PromptInputTextarea
-              onChange={(e: any) => setInput(e.target.value)}
+              onChange={(e) => setInput(e.target.value)}
               className="md:leading-10"
               value={input}
               placeholder="Type your message..."
