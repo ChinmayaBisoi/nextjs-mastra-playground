@@ -1,9 +1,10 @@
 import { AnimatedGroup } from "@/components/ui/animated-group";
 import { TextEffect } from "@/components/ui/text-effect";
-import { ArrowRight, ChevronRight, Paperclip, ArrowUp } from "lucide-react";
+import { ArrowRight, ChevronRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { HeroHeader } from "./header";
+import { PresentationInput } from "./presentation-input";
 import React from "react";
 
 const transitionVariants = {
@@ -140,49 +141,9 @@ export default function HeroSection() {
                     },
                     ...transitionVariants,
                   }}
-                  className="mt-12 flex flex-col items-center justify-center"
+                  className="mt-12"
                 >
-                  <div className="relative w-full max-w-2xl mx-auto">
-                    <div className="relative flex items-center gap-2 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-lg p-4">
-                      <button
-                        type="button"
-                        className="shrink-0 p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                        aria-label="Attach file"
-                      >
-                        <Paperclip className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
-                      </button>
-
-                      <button
-                        type="button"
-                        className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                        aria-label="Import"
-                      >
-                        <div className="flex gap-0.5">
-                          <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                          <div className="w-2 h-2 rounded-full bg-orange-500"></div>
-                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                          <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        </div>
-                        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                          Import
-                        </span>
-                      </button>
-
-                      <input
-                        type="text"
-                        placeholder="What kind of presentation would you like to create?"
-                        className="flex-1 min-w-0 bg-transparent border-0 outline-none text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 px-2"
-                      />
-
-                      <button
-                        type="button"
-                        className="shrink-0 p-2 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
-                        aria-label="Create presentation"
-                      >
-                        <ArrowUp className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
+                  <PresentationInput className="max-w-4xl" />
                 </AnimatedGroup>
               </div>
             </div>
