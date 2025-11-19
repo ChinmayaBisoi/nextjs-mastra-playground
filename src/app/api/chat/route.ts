@@ -3,15 +3,22 @@ import { NextResponse } from "next/server";
 import { toAISdkFormat } from "@mastra/ai-sdk";
 import { convertMessages } from "@mastra/core/agent";
 import { createUIMessageStreamResponse } from "ai";
+import { auth } from "@clerk/nextjs/server";
 
 const weatherAgent = mastra.getAgent("weatherAgent");
 
 export async function POST(req: Request) {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { messages } = await req.json();
 
   const stream = await weatherAgent.stream(messages, {
     memory: {
-      thread: "example-user-id",
+      thread: userId,
       resource: "weather-chat",
     },
   });
@@ -22,10 +29,16 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
+  const { userId } = await auth();
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const memory = await weatherAgent.getMemory();
     const response = await memory?.query({
-      threadId: "example-user-id",
+      threadId: userId,
       resourceId: "weather-chat",
     });
 

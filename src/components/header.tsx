@@ -5,6 +5,7 @@ import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import React from "react";
 import { cn } from "@/lib/utils";
+import { SignInButton, useUser } from "@clerk/nextjs";
 
 const menuItems = [
   { name: "Features", href: "#link" },
@@ -12,6 +13,32 @@ const menuItems = [
   { name: "Pricing", href: "#link" },
   { name: "About", href: "#link" },
 ];
+
+function AuthButtons() {
+  const { isSignedIn, isLoaded } = useUser();
+
+  if (!isLoaded) {
+    return null;
+  }
+
+  return (
+    <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
+      {isSignedIn ? (
+        <Button asChild size="sm">
+          <Link href="/dashboard">
+            <span>Dashboard</span>
+          </Link>
+        </Button>
+      ) : (
+        <SignInButton mode="modal">
+          <Button variant="outline" size="sm">
+            <span>Sign In</span>
+          </Button>
+        </SignInButton>
+      )}
+    </div>
+  );
+}
 
 export const HeroHeader = () => {
   const [menuState, setMenuState] = React.useState(false);
@@ -25,6 +52,7 @@ export const HeroHeader = () => {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
   return (
     <header>
       <nav
@@ -88,36 +116,8 @@ export const HeroHeader = () => {
                   ))}
                 </ul>
               </div>
-              <div className="flex w-full flex-col space-y-3 sm:flex-row sm:gap-3 sm:space-y-0 md:w-fit">
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className={cn(isScrolled && "lg:hidden")}
-                >
-                  <Link href="#">
-                    <span>Login</span>
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  className={cn(isScrolled && "lg:hidden")}
-                >
-                  <Link href="#">
-                    <span>Sign Up</span>
-                  </Link>
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  className={cn(isScrolled ? "lg:inline-flex" : "hidden")}
-                >
-                  <Link href="#">
-                    <span>Get Started</span>
-                  </Link>
-                </Button>
-              </div>
+              {/* Auth Buttons */}
+              <AuthButtons />
             </div>
           </div>
         </div>
