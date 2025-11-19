@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import {
   BadgeCheck,
@@ -7,13 +7,9 @@ import {
   CreditCard,
   LogOut,
   Sparkles,
-} from "lucide-react"
+} from "lucide-react";
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,25 +18,29 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/ui/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
+import { useUser } from "@clerk/nextjs";
+import { Skeleton } from "./ui/skeleton";
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}) {
-  const { isMobile } = useSidebar()
+export function NavUser() {
+  const { isLoaded, user: _user, isSignedIn } = useUser();
+  const { isMobile } = useSidebar();
 
+  if (!isLoaded) return <Skeleton className="w-10 ml-1 mt-2 h-10 rounded-lg" />;
+  if (!isSignedIn) return null;
+  if (!_user) return null;
+
+  const user = {
+    avatar: _user?.imageUrl || "",
+    name: _user?.fullName || "",
+    email: _user?.primaryEmailAddress?.emailAddress || "",
+  };
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -110,5 +110,5 @@ export function NavUser({
         </DropdownMenu>
       </SidebarMenuItem>
     </SidebarMenu>
-  )
+  );
 }
