@@ -25,11 +25,12 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useClerk } from "@clerk/nextjs";
 import { Skeleton } from "./ui/skeleton";
 
 export function NavUser() {
   const { isLoaded, user: _user, isSignedIn } = useUser();
+  const { signOut } = useClerk();
   const { isMobile } = useSidebar();
 
   if (!isLoaded) return <Skeleton className="w-10 ml-1 mt-2 h-10 rounded-lg" />;
@@ -102,7 +103,7 @@ export function NavUser() {
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => signOut()}>
               <LogOut />
               Log out
             </DropdownMenuItem>
