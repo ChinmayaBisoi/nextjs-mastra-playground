@@ -99,7 +99,11 @@ Always ensure your output is valid JSON that can be parsed and used to generate 
   tools: { pptGeneratorTool },
   memory: new Memory({
     storage: new LibSQLStore({
-      url: "file:../mastra.db",
+      // Note: With :memory:, data won't persist across deployments/restarts. For persistence on Vercel, use a remote database or Vercel's storage options.
+      url:
+        process.env.NODE_ENV === "production"
+          ? ":memory:"
+          : "file:../mastra.db",
     }),
   }),
 });

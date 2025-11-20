@@ -28,7 +28,12 @@ export const weatherAgent = new Agent({
   memory: new Memory({
     storage: new LibSQLStore({
       // id: "memory-storage",
-      url: "file:../mastra.db", // path is relative to the .mastra/output directory
+
+      // Note: With :memory:, data won't persist across deployments/restarts. For persistence on Vercel, use a remote database or Vercel's storage options.
+      url:
+        process.env.NODE_ENV === "production"
+          ? ":memory:"
+          : "file:../mastra.db",
     }),
   }),
 });
