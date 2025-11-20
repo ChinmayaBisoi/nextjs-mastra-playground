@@ -8,24 +8,32 @@ import { auth } from "@clerk/nextjs/server";
 const weatherAgent = mastra.getAgent("weatherAgent");
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
+  try {
+    const { userId } = await auth();
 
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { messages } = await req.json();
+
+    const stream = await weatherAgent.stream(messages, {
+      memory: {
+        thread: userId,
+        resource: "weather-chat",
+      },
+    });
+
+    return createUIMessageStreamResponse({
+      stream: toAISdkFormat(stream, { from: "agent" }),
+    });
+  } catch (error: unknown) {
+    console.error(error);
+    return NextResponse.json(
+      { error: "Internal Server Error T-T" },
+      { status: 500 }
+    );
   }
-
-  const { messages } = await req.json();
-
-  const stream = await weatherAgent.stream(messages, {
-    memory: {
-      thread: userId,
-      resource: "weather-chat",
-    },
-  });
-
-  return createUIMessageStreamResponse({
-    stream: toAISdkFormat(stream, { from: "agent" }),
-  });
 }
 
 export async function GET() {
