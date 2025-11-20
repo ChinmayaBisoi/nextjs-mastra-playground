@@ -91,65 +91,81 @@ Audience: ${inputData.audience || "General audience"}
 Proposal Type: ${inputData.proposalType || "General presentation"}
 Requested Slide Count: ${inputData.numSlides || 10}
 
-Please analyze these requirements and respond with a JSON object containing:
+Please analyze these requirements and provide:
 - analyzedTopic: A refined/expanded version of the topic
 - audience: The target audience description
 - suggestedSlides: Optimal number of slides (considering the topic complexity)
-- structure: An object indicating which sections should be included (introduction, problem, solution, benefits, implementation, conclusion)
+- structure: An object indicating which sections should be included (introduction, problem, solution, benefits, implementation, conclusion)`;
 
-Respond ONLY with valid JSON in this format:
-{
-  "analyzedTopic": "...",
-  "audience": "...",
-  "suggestedSlides": 10,
-  "structure": {
-    "introduction": true,
-    "problem": true,
-    "solution": true,
-    "benefits": true,
-    "implementation": true,
-    "conclusion": true
-  }
-}`;
-
-    const response = await agent.generate([
-      {
-        role: "user",
-        content: prompt,
-      },
-    ]);
-
-    // Parse the JSON response
-    let analyzedData;
-    try {
-      // Extract JSON from response (handle markdown code blocks if present)
-      const text = response.text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analyzedData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON found in response");
-      }
-    } catch {
-      // Fallback to default structure if parsing fails
-      analyzedData = {
-        analyzedTopic: inputData.topic,
-        audience: inputData.audience || "General audience",
-        suggestedSlides: inputData.numSlides || 10,
-        structure: {
-          introduction: true,
-          problem: true,
-          solution: true,
-          benefits: true,
-          implementation: true,
-          conclusion: true,
+    const response = await agent.generate(
+      [
+        {
+          role: "user",
+          content: prompt,
         },
-      };
+      ],
+      {
+        structuredOutput: {
+          schema: analyzedRequirementsSchema.omit({
+            originalTopic: true,
+            brandConfig: true,
+          }),
+        },
+        // maxRetries: 1, // Add retry limit
+        // timeout: 30000, // 30 second timeout
+      }
+    );
+
+    if (!response.object) {
+      // Fallback: try to parse the text response manually
+      const text = response.text || "";
+      try {
+        // Try to extract JSON from the response
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return {
+            analyzedTopic: parsed.analyzedTopic || inputData.topic,
+            audience:
+              parsed.audience || inputData.audience || "General audience",
+            suggestedSlides:
+              parsed.suggestedSlides || inputData.numSlides || 10,
+            structure: parsed.structure || {
+              introduction: true,
+              problem: true,
+              solution: true,
+              benefits: true,
+              implementation: true,
+              conclusion: true,
+            },
+            originalTopic: inputData.topic,
+            brandConfig: undefined,
+          };
+        }
+      } catch (e) {
+        // If parsing fails, use defaults
+        return {
+          analyzedTopic: inputData.topic,
+          audience: inputData.audience || "General audience",
+          suggestedSlides: inputData.numSlides || 10,
+          structure: {
+            introduction: true,
+            problem: true,
+            solution: true,
+            benefits: true,
+            implementation: true,
+            conclusion: true,
+          },
+          originalTopic: inputData.topic,
+          brandConfig: undefined,
+        };
+      }
+      throw new Error("Failed to generate structured response from agent");
     }
 
     // Add original topic and brand config for later steps
     return {
-      ...analyzedData,
+      ...response.object,
       originalTopic: inputData.topic,
       brandConfig: undefined, // Will be added in future when brand system is implemented
     };
@@ -186,52 +202,32 @@ Requirements:
 - Each slide should have a compelling title (5-8 words)
 - Each slide should have 3-7 bullet points
 - Content should be professional, clear, and engaging
-- Ensure logical flow and narrative progression
+- Ensure logical flow and narrative progression`;
 
-Return ONLY valid JSON in this exact format:
-{
-  "slides": [
-    {
-      "title": "Slide Title",
-      "content": ["Bullet point 1", "Bullet point 2", "Bullet point 3"],
-      "layout": "titleContent",
-      "notes": "Optional speaker notes"
-    }
-  ]
-}`;
-
-    const response = await agent.generate([
+    const response = await agent.generate(
+      [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       {
-        role: "user",
-        content: prompt,
-      },
-    ]);
-
-    // Parse the JSON response
-    let slideData;
-    try {
-      // Extract JSON from response (handle markdown code blocks if present)
-      const text = response.text;
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        slideData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("No JSON found in response");
+        structuredOutput: {
+          schema: contentStructureSchema.omit({
+            originalTopic: true,
+            brandConfig: true,
+          }),
+        },
       }
+    );
 
-      // Validate that slides array exists
-      if (!slideData.slides || !Array.isArray(slideData.slides)) {
-        throw new Error("Invalid slide data structure");
-      }
-    } catch (error) {
-      throw new Error(
-        `Failed to parse slide content: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
+    if (!response.object) {
+      throw new Error("Failed to generate structured response from agent");
     }
 
     // Pass through original topic and brand config
     return {
-      ...slideData,
+      ...response.object,
       originalTopic: inputData.originalTopic,
       brandConfig: inputData.brandConfig,
     };

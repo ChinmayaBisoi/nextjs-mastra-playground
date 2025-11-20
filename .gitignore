@@ -45,3 +45,6 @@ next-env.d.ts
 /.clerk/
 
 /src/generated/prisma
+
+# mastra
+/.mastra/
