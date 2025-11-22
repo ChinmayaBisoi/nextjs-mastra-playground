@@ -1,45 +1,15 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import BreadcrumbHeader from "@/components/breadcrumb-header";
+import PageLayout from "@/components/layouts/page-layout";
+import { Suspense } from "react";
 
 export default function LibraryPage() {
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-        <div className="flex items-center gap-2 px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-[orientation=vertical]:h-4"
-          />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>Library</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-        </div>
-      </header>
-      <div className="flex flex-1 flex-col gap-6 p-8">
-        <div>
-          <h1 className="text-3xl font-bold">Library</h1>
-          <p className="text-muted-foreground mt-2">
-            Browse templates, themes, and resources
-          </p>
-        </div>
-
+    <Suspense fallback={<div>Suspense Loading...</div>}>
+      <BreadcrumbHeader title="Library" href="/library" />
+      <PageLayout
+        title="Library"
+        description="Browse templates, themes, and resources"
+      >
         <div className="flex gap-4 border-b">
           <button className="px-4 py-2 border-b-2 border-primary font-medium">
             Templates
@@ -66,7 +36,7 @@ export default function LibraryPage() {
             </div>
           ))}
         </div>
-      </div>
-    </>
+      </PageLayout>
+    </Suspense>
   );
 }
