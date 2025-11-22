@@ -1,0 +1,780 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, FileText, ChevronLeft, ChevronRight, X, Plus, Trash2, Type, Square, Circle, Download, Users, MessageSquare, Undo, Redo, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+
+export default function GoogleSlidesEditor() {
+  const [file, setFile] = useState(null);
+  const [slides, setSlides] = useState([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [comments, setComments] = useState([]);
+  const [showComments, setShowComments] = useState(false);
+  const [collaborators] = useState([
+    { id: 1, name: 'You', color: '#3b82f6', active: true },
+    { id: 2, name: 'Sarah K.', color: '#10b981', active: true },
+    { id: 3, name: 'Mike R.', color: '#f59e0b', active: false }
+  ]);
+
+  const canvasRef = useRef(null);
+
+  const handleFileUpload = async (e) => {
+    const uploadedFile = e.target.files[0];
+    
+    if (!uploadedFile) return;
+    
+    const validTypes = [
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ];
+    
+    if (!validTypes.includes(uploadedFile.type)) {
+      setError('Please upload a valid PowerPoint file (.ppt or .pptx)');
+      return;
+    }
+    
+    setError('');
+    setLoading(true);
+    setFile(uploadedFile);
+    
+    try {
+      const initialSlides = Array.from({ length: 3 }, (_, i) => ({
+        id: `slide-${i}`,
+        background: '#ffffff',
+        elements: [
+          {
+            id: `${i}-title`,
+            type: 'text',
+            content: `Slide ${i + 1}`,
+            x: 100,
+            y: 100,
+            width: 600,
+            height: 80,
+            fontSize: 48,
+            color: '#000000',
+            fontWeight: 'bold',
+            align: 'left',
+            zIndex: 1
+          },
+          {
+            id: `${i}-subtitle`,
+            type: 'text',
+            content: 'Click to add text',
+            x: 100,
+            y: 200,
+            width: 600,
+            height: 60,
+            fontSize: 24,
+            color: '#666666',
+            fontWeight: 'normal',
+            align: 'left',
+            zIndex: 2
+          }
+        ]
+      }));
+      
+      setSlides(initialSlides);
+      setCurrentSlide(0);
+      addToHistory(initialSlides);
+    } catch (err) {
+      setError('Failed to process PowerPoint file');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addToHistory = (newSlides) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(JSON.parse(JSON.stringify(newSlides)));
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      setHistoryIndex(historyIndex - 1);
+      setSlides(JSON.parse(JSON.stringify(history[historyIndex - 1])));
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      setHistoryIndex(historyIndex + 1);
+      setSlides(JSON.parse(JSON.stringify(history[historyIndex + 1])));
+    }
+  };
+
+  const updateSlides = (updatedSlides) => {
+    setSlides(updatedSlides);
+    addToHistory(updatedSlides);
+  };
+
+  const handlePrevSlide = () => {
+    setCurrentSlide((prev) => Math.max(0, prev - 1));
+    setSelectedElement(null);
+  };
+
+  const handleNextSlide = () => {
+    setCurrentSlide((prev) => Math.min(slides.length - 1, prev + 1));
+    setSelectedElement(null);
+  };
+
+  const handleReset = () => {
+    setFile(null);
+    setSlides([]);
+    setCurrentSlide(0);
+    setError('');
+    setSelectedElement(null);
+    setHistory([]);
+    setHistoryIndex(-1);
+  };
+
+  const addTextElement = () => {
+    const newElement = {
+      id: `text-${Date.now()}`,
+      type: 'text',
+      content: 'New Text',
+      x: 300,
+      y: 250,
+      width: 400,
+      height: 60,
+      fontSize: 24,
+      color: '#000000',
+      fontWeight: 'normal',
+      align: 'left',
+      zIndex: slides[currentSlide].elements.length + 1
+    };
+    
+    const updatedSlides = [...slides];
+    updatedSlides[currentSlide].elements.push(newElement);
+    updateSlides(updatedSlides);
+  };
+
+  const addShapeElement = (shapeType) => {
+    const newElement = {
+      id: `shape-${Date.now()}`,
+      type: 'shape',
+      shapeType,
+      x: 300,
+      y: 250,
+      width: 200,
+      height: 200,
+      color: '#3b82f6',
+      borderColor: '#1e40af',
+      borderWidth: 2,
+      zIndex: slides[currentSlide].elements.length + 1
+    };
+    
+    const updatedSlides = [...slides];
+    updatedSlides[currentSlide].elements.push(newElement);
+    updateSlides(updatedSlides);
+  };
+
+  const updateElement = (elementId, updates) => {
+    const updatedSlides = [...slides];
+    const elementIndex = updatedSlides[currentSlide].elements.findIndex(
+      el => el.id === elementId
+    );
+    
+    if (elementIndex !== -1) {
+      updatedSlides[currentSlide].elements[elementIndex] = {
+        ...updatedSlides[currentSlide].elements[elementIndex],
+        ...updates
+      };
+      updateSlides(updatedSlides);
+      
+      if (selectedElement?.id === elementId) {
+        setSelectedElement({ ...selectedElement, ...updates });
+      }
+    }
+  };
+
+  const deleteElement = (elementId) => {
+    const updatedSlides = [...slides];
+    updatedSlides[currentSlide].elements = updatedSlides[currentSlide].elements.filter(
+      el => el.id !== elementId
+    );
+    updateSlides(updatedSlides);
+    setSelectedElement(null);
+  };
+
+  const addNewSlide = () => {
+    const newSlide = {
+      id: `slide-${Date.now()}`,
+      background: '#ffffff',
+      elements: [
+        {
+          id: `title-${Date.now()}`,
+          type: 'text',
+          content: 'New Slide',
+          x: 100,
+          y: 100,
+          width: 600,
+          height: 80,
+          fontSize: 48,
+          color: '#000000',
+          fontWeight: 'bold',
+          align: 'left',
+          zIndex: 1
+        }
+      ]
+    };
+    
+    const updatedSlides = [...slides, newSlide];
+    updateSlides(updatedSlides);
+    setCurrentSlide(slides.length);
+  };
+
+  const deleteSlide = () => {
+    if (slides.length <= 1) return;
+    
+    const updatedSlides = slides.filter((_, index) => index !== currentSlide);
+    updateSlides(updatedSlides);
+    setCurrentSlide(Math.max(0, currentSlide - 1));
+  };
+
+  const updateSlideBackground = (color) => {
+    const updatedSlides = [...slides];
+    updatedSlides[currentSlide].background = color;
+    updateSlides(updatedSlides);
+  };
+
+  const handleMouseDown = (e, element) => {
+    if (e.target.contentEditable === 'true') return;
+    
+    setSelectedElement(element);
+    setIsDragging(true);
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    setDragStart({
+      x: e.clientX - rect.left - element.x,
+      y: e.clientY - rect.top - element.y
+    });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging || !selectedElement) return;
+    
+    const rect = canvasRef.current.getBoundingClientRect();
+    const newX = e.clientX - rect.left - dragStart.x;
+    const newY = e.clientY - rect.top - dragStart.y;
+    
+    updateElement(selectedElement.id, { x: newX, y: newY });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const addComment = () => {
+    const newComment = {
+      id: Date.now(),
+      author: 'You',
+      content: 'New comment',
+      timestamp: new Date().toLocaleTimeString(),
+      slideIndex: currentSlide
+    };
+    setComments([...comments, newComment]);
+  };
+
+  const exportPresentation = () => {
+    const dataStr = JSON.stringify(slides, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'presentation-export.json';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isDragging, selectedElement]);
+
+  if (!file) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              Slides Editor
+            </h1>
+            <p className="text-gray-600">Create and collaborate on presentations</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-12">
+            <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-16 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all">
+              <Upload className="w-16 h-16 text-gray-400 mb-4" />
+              <span className="text-xl font-semibold text-gray-700 mb-2">
+                Upload PowerPoint or start blank
+              </span>
+              <span className="text-sm text-gray-500">
+                Supports .ppt and .pptx files
+              </span>
+              <input
+                type="file"
+                accept=".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+            
+            {error && (
+              <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-center">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const currentSlideData = slides[currentSlide];
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+      {/* Top Toolbar */}
+      <div className="bg-white border-b border-gray-200 px-4 py-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <FileText className="w-6 h-6 text-blue-600" />
+            <div>
+              <input
+                type="text"
+                value={file.name}
+                onChange={(e) => setFile({ ...file, name: e.target.value })}
+                className="font-semibold text-gray-900 bg-transparent border-none outline-none"
+              />
+              <p className="text-xs text-gray-500">Last edited just now</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Collaborators */}
+            <div className="flex items-center gap-2 mr-4">
+              {collaborators.map((collab) => (
+                <div
+                  key={collab.id}
+                  className="relative"
+                  title={collab.name}
+                >
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold"
+                    style={{ backgroundColor: collab.color }}
+                  >
+                    {collab.name[0]}
+                  </div>
+                  {collab.active && (
+                    <div className="absolute bottom-0 right-0 w-2 h-2 bg-green-500 rounded-full border-2 border-white"></div>
+                  )}
+                </div>
+              ))}
+              <button className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center hover:bg-gray-300">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowComments(!showComments)}
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <MessageSquare className="w-5 h-5" />
+            </button>
+            <button
+              onClick={exportPresentation}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Export
+            </button>
+            <button
+              onClick={handleReset}
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Secondary Toolbar */}
+        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-200">
+          <button
+            onClick={undo}
+            disabled={historyIndex <= 0}
+            className="p-2 hover:bg-gray-100 rounded disabled:opacity-30"
+            title="Undo"
+          >
+            <Undo className="w-5 h-5" />
+          </button>
+          <button
+            onClick={redo}
+            disabled={historyIndex >= history.length - 1}
+            className="p-2 hover:bg-gray-100 rounded disabled:opacity-30"
+            title="Redo"
+          >
+            <Redo className="w-5 h-5" />
+          </button>
+
+          <div className="w-px h-6 bg-gray-300 mx-2"></div>
+
+          <button
+            onClick={addTextElement}
+            className="px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2"
+          >
+            <Type className="w-5 h-5" />
+            Text
+          </button>
+          <button
+            onClick={() => addShapeElement('rectangle')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="Rectangle"
+          >
+            <Square className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addShapeElement('circle')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="Circle"
+          >
+            <Circle className="w-5 h-5" />
+          </button>
+
+          {selectedElement?.type === 'text' && (
+            <>
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+              <button className="p-2 hover:bg-gray-100 rounded">
+                <Bold className="w-5 h-5" />
+              </button>
+              <button className="p-2 hover:bg-gray-100 rounded">
+                <Italic className="w-5 h-5" />
+              </button>
+              <button className="p-2 hover:bg-gray-100 rounded">
+                <Underline className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => updateElement(selectedElement.id, { align: 'left' })}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <AlignLeft className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => updateElement(selectedElement.id, { align: 'center' })}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <AlignCenter className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => updateElement(selectedElement.id, { align: 'right' })}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <AlignRight className="w-5 h-5" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar - Slides */}
+        <div className="w-64 bg-white border-r border-gray-200 overflow-y-auto p-4">
+          <div className="space-y-3">
+            {slides.map((slide, index) => (
+              <div
+                key={slide.id}
+                onClick={() => {
+                  setCurrentSlide(index);
+                  setSelectedElement(null);
+                }}
+                className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                  currentSlide === index
+                    ? 'border-blue-600 shadow-lg'
+                    : 'border-gray-200 hover:border-blue-300'
+                }`}
+              >
+                <div
+                  className="aspect-video text-xs p-2"
+                  style={{ backgroundColor: slide.background }}
+                >
+                  <div className="text-gray-600 font-semibold">
+                    {index + 1}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={addNewSlide}
+              className="w-full aspect-video border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center hover:border-blue-500 hover:bg-blue-50 transition-all"
+            >
+              <Plus className="w-6 h-6 text-gray-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Main Canvas */}
+        <div className="flex-1 p-8 overflow-auto">
+          <div className="max-w-5xl mx-auto">
+            <div className="bg-white rounded-lg shadow-2xl overflow-hidden">
+              <div
+                ref={canvasRef}
+                className="relative aspect-video cursor-default"
+                style={{ backgroundColor: currentSlideData?.background }}
+                onClick={() => setSelectedElement(null)}
+              >
+                {currentSlideData?.elements
+                  .sort((a, b) => a.zIndex - b.zIndex)
+                  .map((element) => (
+                    <div
+                      key={element.id}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        handleMouseDown(e, element);
+                      }}
+                      className={`absolute ${
+                        selectedElement?.id === element.id
+                          ? 'ring-2 ring-blue-500'
+                          : ''
+                      }`}
+                      style={{
+                        left: `${element.x}px`,
+                        top: `${element.y}px`,
+                        width: element.width ? `${element.width}px` : 'auto',
+                        height: element.height ? `${element.height}px` : 'auto',
+                        cursor: 'move'
+                      }}
+                    >
+                      {element.type === 'text' ? (
+                        <div
+                          contentEditable={selectedElement?.id === element.id}
+                          suppressContentEditableWarning
+                          onBlur={(e) => updateElement(element.id, { content: e.target.innerText })}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            fontSize: `${element.fontSize}px`,
+                            color: element.color,
+                            fontWeight: element.fontWeight,
+                            textAlign: element.align,
+                            width: '100%',
+                            height: '100%',
+                            outline: 'none',
+                            padding: '8px'
+                          }}
+                          className="cursor-text"
+                        >
+                          {element.content}
+                        </div>
+                      ) : element.type === 'shape' ? (
+                        element.shapeType === 'rectangle' ? (
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              backgroundColor: element.color,
+                              border: `${element.borderWidth}px solid ${element.borderColor}`,
+                              borderRadius: '8px'
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              backgroundColor: element.color,
+                              border: `${element.borderWidth}px solid ${element.borderColor}`,
+                              borderRadius: '50%'
+                            }}
+                          />
+                        )
+                      ) : null}
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div className="flex items-center justify-center gap-4 mt-6">
+              <button
+                onClick={handlePrevSlide}
+                disabled={currentSlide === 0}
+                className="p-2 bg-white rounded-full shadow hover:shadow-lg disabled:opacity-30 transition-all"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+
+              <span className="text-gray-700 font-medium">
+                {currentSlide + 1} / {slides.length}
+              </span>
+
+              <button
+                onClick={handleNextSlide}
+                disabled={currentSlide === slides.length - 1}
+                className="p-2 bg-white rounded-full shadow hover:shadow-lg disabled:opacity-30 transition-all"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Sidebar - Properties & Comments */}
+        {(selectedElement || showComments) && (
+          <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto p-4">
+            {showComments ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">Comments</h3>
+                  <button
+                    onClick={addComment}
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    Add comment
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {comments
+                    .filter((c) => c.slideIndex === currentSlide)
+                    .map((comment) => (
+                      <div
+                        key={comment.id}
+                        className="p-3 bg-gray-50 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs">
+                            {comment.author[0]}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold">
+                              {comment.author}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {comment.timestamp}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-700">{comment.content}</p>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : selectedElement ? (
+              <div className="space-y-4">
+                <h3 className="font-semibold text-gray-900">Properties</h3>
+
+                {selectedElement.type === 'text' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Font Size: {selectedElement.fontSize}px
+                      </label>
+                      <input
+                        type="range"
+                        min="12"
+                        max="96"
+                        value={selectedElement.fontSize}
+                        onChange={(e) =>
+                          updateElement(selectedElement.id, {
+                            fontSize: parseInt(e.target.value)
+                          })
+                        }
+                        className="w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Text Color
+                      </label>
+                      <input
+                        type="color"
+                        value={selectedElement.color}
+                        onChange={(e) =>
+                          updateElement(selectedElement.id, { color: e.target.value })
+                        }
+                        className="w-full h-10 rounded cursor-pointer"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {selectedElement.type === 'shape' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Fill Color
+                      </label>
+                      <input
+                        type="color"
+                        value={selectedElement.color}
+                        onChange={(e) =>
+                          updateElement(selectedElement.id, { color: e.target.value })
+                        }
+                        className="w-full h-10 rounded cursor-pointer"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Border Color
+                      </label>
+                      <input
+                        type="color"
+                        value={selectedElement.borderColor}
+                        onChange={(e) =>
+                          updateElement(selectedElement.id, {
+                            borderColor: e.target.value
+                          })
+                        }
+                        className="w-full h-10 rounded cursor-pointer"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Background
+                  </label>
+                  <input
+                    type="color"
+                    value={currentSlideData?.background}
+                    onChange={(e) => updateSlideBackground(e.target.value)}
+                    className="w-full h-10 rounded cursor-pointer"
+                  />
+                </div>
+
+                <button
+                  onClick={() => deleteElement(selectedElement.id)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete Element
+                </button>
+
+                {slides.length > 1 && (
+                  <button
+                    onClick={deleteSlide}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Slide
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

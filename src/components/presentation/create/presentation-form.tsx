@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 
 type PresentationFormInput = {
   description: string;
@@ -27,6 +28,7 @@ type Outline = {
 };
 
 export function PresentationForm() {
+  const router = useRouter();
   const [slideCount, setSlideCount] = useState(8);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -173,7 +175,7 @@ export function PresentationForm() {
     }
   };
 
-  const handleGeneratePPT = async () => {
+  const handleDownloadPPT = async () => {
     if (!presentationId && !outline) {
       toast.error("Please generate an outline first");
       return;
@@ -240,6 +242,15 @@ export function PresentationForm() {
     } finally {
       setIsGeneratingPPT(false);
     }
+  };
+
+  const handleGeneratePPT = () => {
+    if (!presentationId) {
+      toast.error("Please generate an outline first");
+      return;
+    }
+
+    router.push(`/create/${presentationId}`);
   };
 
   return (
@@ -313,13 +324,23 @@ export function PresentationForm() {
               className="min-h-[300px] font-mono text-sm"
               placeholder="Outline JSON will appear here..."
             />
-            <Button
-              onClick={handleGeneratePPT}
-              disabled={isGeneratingPPT}
-              className="w-full"
-            >
-              {isGeneratingPPT ? "Generating PPT..." : "Generate PowerPoint"}
-            </Button>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Button
+                onClick={handleDownloadPPT}
+                disabled={isGeneratingPPT}
+                variant="outline"
+                className="w-full"
+              >
+                {isGeneratingPPT ? "Generating..." : "Download PPT"}
+              </Button>
+              <Button
+                onClick={handleGeneratePPT}
+                disabled={isGeneratingPPT || !presentationId}
+                className="w-full"
+              >
+                Generate PPT
+              </Button>
+            </div>
           </div>
         </>
       )}

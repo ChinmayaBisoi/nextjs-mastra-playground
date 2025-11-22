@@ -167,13 +167,26 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
     const theme = layoutTheme?.theme;
     const layouts = layoutTheme?.layouts;
 
-    const primaryColor = theme?.primaryColor?.replace("#", "") || "363636";
+    // Ensure colors are in correct format (PptxGenJS expects hex without #)
+    // Use theme colors from API if provided, otherwise use design system defaults
+    // Design system: foreground (text) = oklch(0.145 0 0) ≈ #252525, background = white = #FFFFFF
+    const primaryColor = theme?.primaryColor?.replace("#", "") || "252525";
     const headingFont = theme?.headingFont || "Calibri";
     const bodyFont = theme?.bodyFont || "Calibri";
-    const textColor = theme?.textColor?.replace("#", "") || "363636";
+    // Use theme text color if provided, otherwise use design system foreground color
+    const textColor = theme?.textColor?.replace("#", "") || "252525";
+
+    // Use theme background if provided, otherwise use design system background (white)
+    const backgroundColor =
+      theme?.backgroundColor?.replace("#", "") || "FFFFFF";
 
     for (const slide of slidesData.slides) {
       const pptxSlide = pres.addSlide();
+
+      // Set slide background to white to ensure text visibility
+      // PptxGenJS background format - use fill property
+      pptxSlide.background = { fill: backgroundColor };
+
       const layoutSpec = layouts?.[slide.layout];
 
       switch (slide.layout) {
@@ -208,11 +221,12 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
             h: titleLayout?.h ?? 1.5,
             fontSize: titleLayout?.fontSize ?? theme?.titleFontSize ?? 44,
             bold: titleLayout?.bold ?? true,
-            color: primaryColor,
+            color: primaryColor || "252525",
             fontFace: headingFont,
             align:
               (titleLayout?.align as "left" | "center" | "right" | undefined) ??
               "center",
+            valign: "middle",
           });
           break;
 
@@ -249,8 +263,9 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
               h: contentLayout?.h ?? 0.7,
               fontSize: contentLayout?.fontSize ?? theme?.bodyFontSize ?? 18,
               bullet: contentLayout?.bullet ?? true,
-              color: textColor,
+              color: textColor || "252525",
               fontFace: bodyFont,
+              valign: "top",
             });
           });
           break;
@@ -309,8 +324,9 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
             h: tcTitleLayout?.h ?? 0.8,
             fontSize: tcTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
             bold: tcTitleLayout?.bold ?? true,
-            color: primaryColor,
+            color: primaryColor || "252525",
             fontFace: headingFont,
+            valign: "top",
           });
 
           slide.content.forEach((item, index) => {
@@ -322,9 +338,10 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
               h: tcContentLayout?.h ?? 0.6,
               fontSize: tcContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
               bullet: tcContentLayout?.bullet ?? true,
-              color: textColor,
+              color: textColor || "252525",
               fontFace: bodyFont,
               lineSpacing: theme?.lineSpacing ?? 28,
+              valign: "top",
             });
           });
           break;
@@ -382,8 +399,9 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
             h: itTitleLayout?.h ?? 0.8,
             fontSize: itTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
             bold: itTitleLayout?.bold ?? true,
-            color: primaryColor,
+            color: primaryColor || "252525",
             fontFace: headingFont,
+            valign: "top",
           });
 
           slide.content.forEach((item, index) => {
@@ -395,8 +413,9 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
               h: itContentLayout?.h ?? 0.6,
               fontSize: itContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
               bullet: itContentLayout?.bullet ?? true,
-              color: textColor,
+              color: textColor || "252525",
               fontFace: bodyFont,
+              valign: "top",
             });
           });
           break;

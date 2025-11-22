@@ -16,6 +16,18 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-slide-background: var(--slide-background);
+  --color-slide-text: var(--slide-text);
+  --color-slide-text-muted: var(--slide-text-muted);
+  --color-slide-hover: var(--slide-hover);
+  --color-slide-placeholder: var(--slide-placeholder);
+  --color-slide-placeholder-text: var(--slide-placeholder-text);
+  --color-editor-bg: var(--editor-bg);
+  --color-editor-border: var(--editor-border);
+  --color-editor-text: var(--editor-text);
+  --color-editor-text-muted: var(--editor-text-muted);
+  --color-editor-accent: var(--editor-accent);
+  --color-editor-accent-hover: var(--editor-accent-hover);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -76,6 +88,18 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --slide-background: oklch(1 0 0);
+  --slide-text: oklch(0.145 0 0);
+  --slide-text-muted: oklch(0.556 0 0);
+  --slide-hover: oklch(0.97 0 0);
+  --slide-placeholder: oklch(0.97 0 0);
+  --slide-placeholder-text: oklch(0.708 0 0);
+  --editor-bg: oklch(0.97 0 0);
+  --editor-border: oklch(0.922 0 0);
+  --editor-text: oklch(0.145 0 0);
+  --editor-text-muted: oklch(0.556 0 0);
+  --editor-accent: oklch(0.398 0.07 227.392);
+  --editor-accent-hover: oklch(0.398 0.1 227.392);
 }
 
 .dark {
@@ -110,6 +134,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --slide-background: oklch(0.205 0 0);
+  --slide-text: oklch(0.985 0 0);
+  --slide-text-muted: oklch(0.708 0 0);
+  --slide-hover: oklch(0.269 0 0);
+  --slide-placeholder: oklch(0.269 0 0);
+  --slide-placeholder-text: oklch(0.708 0 0);
+  --editor-bg: oklch(0.269 0 0);
+  --editor-border: oklch(1 0 0 / 10%);
+  --editor-text: oklch(0.985 0 0);
+  --editor-text-muted: oklch(0.708 0 0);
+  --editor-accent: oklch(0.488 0.243 264.376);
+  --editor-accent-hover: oklch(0.488 0.3 264.376);
 }
 
 @layer base {
