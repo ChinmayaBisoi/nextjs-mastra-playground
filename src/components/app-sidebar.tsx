@@ -126,11 +126,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 <NextLink
                   href="/create"
                   className={cn(
-                    "justify-center",
-                    "bg-sidebar-primary hover:bg-sidebar-primary/90"
+                    "bg-sidebar-primary hover:bg-sidebar-primary/90",
+                    "justify-center"
                   )}
                 >
-                  <span>Create</span>
+                  <span className={cn("group-data-[collapsible=icon]:hidden")}>
+                    Create
+                  </span>
                   <PlusCircleIcon />
                 </NextLink>
               </SidebarMenuButton>
