@@ -11,6 +11,12 @@ import {
   PieChart,
   Settings2,
   SquareTerminal,
+  LayoutDashboard,
+  Presentation,
+  Library,
+  Users,
+  Plug,
+  CreditCard,
 } from "lucide-react";
 import * as React from "react";
 
@@ -52,89 +58,35 @@ const data = {
   ],
   navMain: [
     {
-      title: "Playground",
-      url: "#",
-      icon: SquareTerminal,
+      title: "Dashboard",
+      url: "/dashboard",
+      icon: LayoutDashboard,
       isActive: true,
-      items: [
-        {
-          title: "History",
-          url: "#",
-        },
-        {
-          title: "Starred",
-          url: "#",
-        },
-        {
-          title: "Settings",
-          url: "#",
-        },
-      ],
     },
     {
-      title: "Models",
-      url: "#",
-      icon: Bot,
-      items: [
-        {
-          title: "Genesis",
-          url: "#",
-        },
-        {
-          title: "Explorer",
-          url: "#",
-        },
-        {
-          title: "Quantum",
-          url: "#",
-        },
-      ],
+      title: "My Presentations",
+      url: "/presentations",
+      icon: Presentation,
     },
     {
-      title: "Documentation",
-      url: "#",
-      icon: BookOpen,
-      items: [
-        {
-          title: "Introduction",
-          url: "#",
-        },
-        {
-          title: "Get Started",
-          url: "#",
-        },
-        {
-          title: "Tutorials",
-          url: "#",
-        },
-        {
-          title: "Changelog",
-          url: "#",
-        },
-      ],
+      title: "Library",
+      url: "/library",
+      icon: Library,
     },
     {
-      title: "Settings",
-      url: "#",
-      icon: Settings2,
-      items: [
-        {
-          title: "General",
-          url: "#",
-        },
-        {
-          title: "Team",
-          url: "#",
-        },
-        {
-          title: "Billing",
-          url: "#",
-        },
-        {
-          title: "Limits",
-          url: "#",
-        },
-      ],
+      title: "Team",
+      url: "/team",
+      icon: Users,
+    },
+    {
+      title: "Integrations",
+      url: "/integrations",
+      icon: Plug,
+    },
+    {
+      title: "Billing",
+      url: "/billing",
+      icon: CreditCard,
     },
   ],
   projects: [
