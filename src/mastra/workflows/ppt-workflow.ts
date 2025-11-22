@@ -56,6 +56,49 @@ const contentStructureSchema = z.object({
     .optional(),
 });
 
+const layoutElementSchema = z
+  .object({
+    x: z.number().optional(),
+    y: z.number().optional(),
+    w: z.number().optional(),
+    h: z.number().optional(),
+    fontSize: z.number().optional(),
+    bold: z.boolean().optional(),
+    align: z.string().optional(),
+    bullet: z.boolean().optional(),
+    spacing: z.number().optional(),
+  })
+  .passthrough();
+
+type LayoutElement = z.infer<typeof layoutElementSchema>;
+
+const layoutThemeSchema = z.object({
+  theme: z.object({
+    primaryColor: z.string(),
+    secondaryColor: z.string().optional(),
+    accentColor: z.string().optional(),
+    backgroundColor: z.string().optional(),
+    textColor: z.string().optional(),
+    headingFont: z.string(),
+    bodyFont: z.string(),
+    headingFontSize: z.number(),
+    bodyFontSize: z.number(),
+    titleFontSize: z.number(),
+    lineSpacing: z.number().optional(),
+    slideMargin: z.number().optional(),
+  }),
+  layouts: z.object({
+    title: z.record(z.string(), layoutElementSchema),
+    content: z.record(z.string(), layoutElementSchema),
+    titleContent: z.record(z.string(), layoutElementSchema),
+    imageText: z.record(z.string(), layoutElementSchema),
+  }),
+});
+
+const contentWithThemeSchema = contentStructureSchema.extend({
+  layoutTheme: layoutThemeSchema.optional(),
+});
+
 const workflowOutputSchema = z.object({
   pptBuffer: z.string().describe("Base64 encoded PPTX file"),
   filename: z.string(),
@@ -142,7 +185,7 @@ Please analyze these requirements and provide:
             brandConfig: undefined,
           };
         }
-      } catch (e) {
+      } catch {
         // If parsing fails, use defaults
         return {
           analyzedTopic: inputData.topic,
@@ -234,6 +277,148 @@ Requirements:
   },
 });
 
+const generateLayoutTheme = createStep({
+  id: "generate-layout-theme",
+  description:
+    "Generates layout specifications and visual theme for the presentation",
+  inputSchema: contentStructureSchema,
+  outputSchema: contentWithThemeSchema,
+  execute: async ({ inputData, mastra }) => {
+    if (!inputData) {
+      throw new Error("Input data not found");
+    }
+
+    if (!mastra) {
+      throw new Error("Mastra instance not found");
+    }
+
+    const agent = mastra.getAgent("layoutThemeAgent");
+    if (!agent) {
+      throw new Error("Layout theme agent not found");
+    }
+
+    const prompt = `Design a professional layout and theme for a presentation about: "${inputData.originalTopic || "Presentation"}"
+
+The presentation has ${inputData.slides?.length || 0} slides with the following structure:
+${JSON.stringify(
+  inputData.slides?.map((s) => ({ title: s.title, layout: s.layout })),
+  null,
+  2
+)}
+
+Requirements:
+- Create a cohesive visual theme with appropriate colors, fonts, and spacing
+- Design optimal layouts for each slide type (title, content, titleContent, imageText)
+- Ensure professional, consulting-grade appearance
+- Consider the topic and content when selecting the theme style
+- Provide exact positioning and styling specifications
+
+Return the theme and layout specifications in the required JSON format.`;
+
+    const response = await agent.generate(
+      [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      {
+        structuredOutput: {
+          schema: layoutThemeSchema,
+        },
+      }
+    );
+
+    if (!response.object) {
+      // Fallback to default theme
+      const defaultTheme: z.infer<typeof layoutThemeSchema> = {
+        theme: {
+          primaryColor: "#363636",
+          secondaryColor: "#4472C4",
+          headingFont: "Calibri",
+          bodyFont: "Calibri",
+          headingFontSize: 32,
+          bodyFontSize: 16,
+          titleFontSize: 44,
+          lineSpacing: 28,
+          slideMargin: 0.5,
+        },
+        layouts: {
+          title: {
+            title: {
+              x: 0.5,
+              y: 2,
+              w: 9,
+              h: 1.5,
+              fontSize: 44,
+              bold: true,
+              align: "center",
+            },
+          },
+          content: {
+            content: {
+              x: 0.5,
+              y: 0.5,
+              w: 9,
+              h: 0.7,
+              fontSize: 18,
+              bullet: true,
+              spacing: 0.8,
+            },
+          },
+          titleContent: {
+            title: {
+              x: 0.5,
+              y: 0.3,
+              w: 9,
+              h: 0.8,
+              fontSize: 32,
+              bold: true,
+            },
+            content: {
+              x: 0.7,
+              y: 1.3,
+              w: 8.6,
+              h: 0.6,
+              fontSize: 16,
+              bullet: true,
+              spacing: 0.7,
+            },
+          },
+          imageText: {
+            title: {
+              x: 0.5,
+              y: 0.3,
+              w: 9,
+              h: 0.8,
+              fontSize: 32,
+              bold: true,
+            },
+            content: {
+              x: 0.7,
+              y: 1.3,
+              w: 4.5,
+              h: 0.6,
+              fontSize: 16,
+              bullet: true,
+              spacing: 0.7,
+            },
+          },
+        },
+      };
+      return {
+        ...inputData,
+        layoutTheme: defaultTheme,
+      };
+    }
+
+    return {
+      ...inputData,
+      layoutTheme: response.object,
+    };
+  },
+});
+
 // Helper function to generate PPT (extracted from tool logic)
 async function generatePptFile(
   slides: Array<{
@@ -248,7 +433,8 @@ async function generatePptFile(
     fontFamily?: string;
     logoUrl?: string;
   },
-  title?: string
+  title?: string,
+  layoutTheme?: z.infer<typeof layoutThemeSchema>
 ) {
   const pres = new PptxGenJS();
 
@@ -261,91 +447,128 @@ async function generatePptFile(
     pres.layout = "CUSTOM";
   }
 
-  const primaryColor = brandConfig?.primaryColor || "363636";
-  const fontFamily = brandConfig?.fontFamily || "Calibri";
+  // Use layout theme if available, otherwise use brand config or defaults
+  const theme = layoutTheme?.theme;
+  const layouts = layoutTheme?.layouts;
+
+  const primaryColor =
+    theme?.primaryColor?.replace("#", "") ||
+    brandConfig?.primaryColor?.replace("#", "") ||
+    "363636";
+  const headingFont =
+    theme?.headingFont || brandConfig?.fontFamily || "Calibri";
+  const bodyFont = theme?.bodyFont || brandConfig?.fontFamily || "Calibri";
+  const textColor = theme?.textColor?.replace("#", "") || "363636";
 
   for (const slide of slides) {
     const pptxSlide = pres.addSlide();
+    const layoutSpec = layouts?.[slide.layout];
 
     switch (slide.layout) {
       case "title":
+        const titleLayout =
+          (layoutSpec?.title as LayoutElement | undefined) ||
+          (layouts?.title?.title as LayoutElement | undefined);
         pptxSlide.addText(slide.title, {
-          x: 0.5,
-          y: 2,
-          w: 9,
-          h: 1.5,
-          fontSize: 44,
-          bold: true,
+          x: titleLayout?.x ?? 0.5,
+          y: titleLayout?.y ?? 2,
+          w: titleLayout?.w ?? 9,
+          h: titleLayout?.h ?? 1.5,
+          fontSize: titleLayout?.fontSize ?? theme?.titleFontSize ?? 44,
+          bold: titleLayout?.bold ?? true,
           color: primaryColor,
-          fontFace: fontFamily,
-          align: "center",
+          fontFace: headingFont,
+          align:
+            (titleLayout?.align as "left" | "center" | "right" | undefined) ??
+            "center",
         });
         break;
 
       case "content":
+        const contentLayout =
+          (layoutSpec?.content as LayoutElement | undefined) ||
+          (layouts?.content?.content as LayoutElement | undefined);
         slide.content.forEach((item, index) => {
+          const spacing = contentLayout?.spacing ?? 0.8;
           pptxSlide.addText(item, {
-            x: 0.5,
-            y: 0.5 + index * 0.8,
-            w: 9,
-            h: 0.7,
-            fontSize: 18,
-            bullet: true,
-            color: "363636",
-            fontFace: fontFamily,
+            x: contentLayout?.x ?? 0.5,
+            y: (contentLayout?.y ?? 0.5) + index * spacing,
+            w: contentLayout?.w ?? 9,
+            h: contentLayout?.h ?? 0.7,
+            fontSize: contentLayout?.fontSize ?? theme?.bodyFontSize ?? 18,
+            bullet: contentLayout?.bullet ?? true,
+            color: textColor,
+            fontFace: bodyFont,
           });
         });
         break;
 
       case "titleContent":
       default:
+        const tcTitleLayout =
+          (layoutSpec?.title as LayoutElement | undefined) ||
+          (layouts?.titleContent?.title as LayoutElement | undefined);
+        const tcContentLayout =
+          (layoutSpec?.content as LayoutElement | undefined) ||
+          (layouts?.titleContent?.content as LayoutElement | undefined);
+
         pptxSlide.addText(slide.title, {
-          x: 0.5,
-          y: 0.3,
-          w: 9,
-          h: 0.8,
-          fontSize: 32,
-          bold: true,
+          x: tcTitleLayout?.x ?? 0.5,
+          y: tcTitleLayout?.y ?? 0.3,
+          w: tcTitleLayout?.w ?? 9,
+          h: tcTitleLayout?.h ?? 0.8,
+          fontSize: tcTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
+          bold: tcTitleLayout?.bold ?? true,
           color: primaryColor,
-          fontFace: fontFamily,
+          fontFace: headingFont,
         });
 
         slide.content.forEach((item, index) => {
+          const spacing = tcContentLayout?.spacing ?? 0.7;
           pptxSlide.addText(item, {
-            x: 0.7,
-            y: 1.3 + index * 0.7,
-            w: 8.6,
-            h: 0.6,
-            fontSize: 16,
-            bullet: true,
-            color: "363636",
-            fontFace: fontFamily,
-            lineSpacing: 28,
+            x: tcContentLayout?.x ?? 0.7,
+            y: (tcContentLayout?.y ?? 1.3) + index * spacing,
+            w: tcContentLayout?.w ?? 8.6,
+            h: tcContentLayout?.h ?? 0.6,
+            fontSize: tcContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
+            bullet: tcContentLayout?.bullet ?? true,
+            color: textColor,
+            fontFace: bodyFont,
+            lineSpacing: theme?.lineSpacing ?? 28,
           });
         });
         break;
 
       case "imageText":
+        const itTitleLayout =
+          (layoutSpec?.title as LayoutElement | undefined) ||
+          (layouts?.imageText?.title as LayoutElement | undefined);
+        const itContentLayout =
+          (layoutSpec?.content as LayoutElement | undefined) ||
+          (layouts?.imageText?.content as LayoutElement | undefined);
+
         pptxSlide.addText(slide.title, {
-          x: 0.5,
-          y: 0.3,
-          w: 9,
-          h: 0.8,
-          fontSize: 32,
-          bold: true,
+          x: itTitleLayout?.x ?? 0.5,
+          y: itTitleLayout?.y ?? 0.3,
+          w: itTitleLayout?.w ?? 9,
+          h: itTitleLayout?.h ?? 0.8,
+          fontSize: itTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
+          bold: itTitleLayout?.bold ?? true,
           color: primaryColor,
-          fontFace: fontFamily,
+          fontFace: headingFont,
         });
+
         slide.content.forEach((item, index) => {
+          const spacing = itContentLayout?.spacing ?? 0.7;
           pptxSlide.addText(item, {
-            x: 0.7,
-            y: 1.3 + index * 0.7,
-            w: 4.5,
-            h: 0.6,
-            fontSize: 16,
-            bullet: true,
-            color: "363636",
-            fontFace: fontFamily,
+            x: itContentLayout?.x ?? 0.7,
+            y: (itContentLayout?.y ?? 1.3) + index * spacing,
+            w: itContentLayout?.w ?? 4.5,
+            h: itContentLayout?.h ?? 0.6,
+            fontSize: itContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
+            bullet: itContentLayout?.bullet ?? true,
+            color: textColor,
+            fontFace: bodyFont,
           });
         });
         break;
@@ -370,7 +593,7 @@ async function generatePptFile(
 const createPptFile = createStep({
   id: "create-ppt-file",
   description: "Generates PowerPoint file from structured slide data",
-  inputSchema: contentStructureSchema,
+  inputSchema: contentWithThemeSchema,
   outputSchema: workflowOutputSchema,
   execute: async ({ inputData }) => {
     if (!inputData) {
@@ -385,11 +608,12 @@ const createPptFile = createStep({
       throw new Error("Slides data is required and must not be empty");
     }
 
-    // Generate PPT file using helper function
+    // Generate PPT file using helper function with layout theme
     const result = await generatePptFile(
       inputData.slides,
       inputData.brandConfig,
-      inputData.originalTopic || "Presentation"
+      inputData.originalTopic || "Presentation",
+      inputData.layoutTheme
     );
 
     return {
@@ -411,6 +635,7 @@ const pptWorkflow = createWorkflow({
 })
   .then(analyzeRequirements)
   .then(generateContentStructure)
+  .then(generateLayoutTheme)
   .then(createPptFile);
 
 pptWorkflow.commit();
