@@ -19,3 +19,24 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+enum PresentationStatus {
+  DRAFT
+  OUTLINE_GENERATED
+  PPT_GENERATED
+}
+
+model Presentation {
+  id               String             @id @default(cuid())
+  userId           String
+  description      String
+  slideCount       Int
+  webSearchEnabled Boolean            @default(false)
+  outline          Json?
+  status           PresentationStatus @default(DRAFT)
+  pptFileUrl       String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([userId])
+}

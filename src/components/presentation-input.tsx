@@ -9,19 +9,21 @@ interface PresentationInputProps {
   onSubmit?: (value: string) => void;
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }
 
 export function PresentationInput({
   onSubmit,
   placeholder = "What can I build for you today?",
   className,
+  disabled = false,
 }: PresentationInputProps) {
   const [value, setValue] = React.useState("");
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleSubmit = () => {
-    if (value.trim() && onSubmit) {
+    if (value.trim() && onSubmit && !disabled) {
       onSubmit(value.trim());
       setValue("");
       if (textareaRef.current) {
@@ -85,7 +87,8 @@ export function PresentationInput({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="block relative z-10 resize-none overflow-auto py-5 pb-0 px-5 w-full max-h-[250px] min-h-[80px] bg-transparentplaceholder:opacity-50 dark:placeholder:opacity-80 text-[14px] placeholder:text-[14px] focus:outline-none leading-[150%]"
+          disabled={disabled}
+          className="block relative z-10 resize-none overflow-auto py-5 pb-0 px-5 w-full max-h-[250px] min-h-[80px] bg-transparentplaceholder:opacity-50 dark:placeholder:opacity-80 text-[14px] placeholder:text-[14px] focus:outline-none leading-[150%] disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label="prompt"
         />
       </div>
@@ -188,15 +191,15 @@ export function PresentationInput({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!value.trim()}
+            disabled={!value.trim() || disabled}
             className={cn(
               "relative flex items-center justify-center cursor-pointer w-[26px] h-[26px] rounded-md transition-colors",
-              value.trim()
+              value.trim() && !disabled
                 ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200"
                 : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed opacity-80"
             )}
             aria-label="Submit prompt"
-            aria-disabled={!value.trim()}
+            aria-disabled={!value.trim() || disabled}
           >
             <div className="w-full flex items-center justify-center pointer-events-none">
               <div className="flex items-center justify-center gap-1">
