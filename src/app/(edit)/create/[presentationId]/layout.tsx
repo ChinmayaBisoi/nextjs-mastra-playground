@@ -1,5 +1,11 @@
-import SidebarLayout from "@/components/layouts/sidebar-layout";
+import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <SidebarLayout>{children}</SidebarLayout>;
+  return (
+    <SidebarProvider>
+      <SidebarInset className="flex flex-col h-screen min-h-0 overflow-hidden">
+        {children}
+      </SidebarInset>
+    </SidebarProvider>
+  );
 }

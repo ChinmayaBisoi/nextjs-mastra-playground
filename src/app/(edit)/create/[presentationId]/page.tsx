@@ -1,29 +1,28 @@
 "use client";
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Upload,
-  FileText,
-  ChevronLeft,
-  ChevronRight,
-  X,
-  Plus,
-  Trash2,
-  Type,
-  Square,
-  Circle,
-  MessageSquare,
-  Undo,
-  Redo,
-  Bold,
-  Italic,
-  Underline,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-} from "lucide-react";
 import BreadcrumbHeader from "@/components/breadcrumb-header";
 import PageLayout from "@/components/layouts/page-layout";
-import SidebarLayout from "@/components/layouts/sidebar-layout";
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Bold,
+  Circle,
+  FileText,
+  Italic,
+  Plus,
+  Redo,
+  Square,
+  Trash2,
+  Type,
+  Undo,
+  Upload,
+  X,
+  Loader2,
+  ArrowLeft,
+} from "lucide-react";
+import PptxGenJS from "pptxgenjs";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 
 type TextElement = {
   id: string;
@@ -81,7 +80,49 @@ type FileWithName = File & {
   name: string;
 };
 
+type OutlineSlide = {
+  title: string;
+  content: string[];
+  layout: "title" | "content" | "titleContent" | "imageText";
+  notes?: string;
+};
+
+type Presentation = {
+  id: string;
+  description: string;
+  slideCount: number;
+  outline: {
+    slides: OutlineSlide[];
+  } | null;
+  status: string;
+};
+
+type StreamMessage =
+  | {
+      type: "progress";
+      current: number;
+      total: number;
+      message: string;
+    }
+  | {
+      type: "slide";
+      slideIndex: number;
+      slide: OutlineSlide;
+    }
+  | {
+      type: "complete";
+      presentationId: string;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
+
 export default function GoogleSlidesEditor() {
+  const params = useParams();
+  const router = useRouter();
+  const presentationId = params?.presentationId as string;
+
   const [file, setFile] = useState<FileWithName | null>(null);
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -102,8 +143,360 @@ export default function GoogleSlidesEditor() {
     { id: 3, name: "Mike R.", color: "#f59e0b", active: false },
   ]);
 
+  // New state for presentation and generation
+  const [presentation, setPresentation] = useState<Presentation | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState({
+    current: 0,
+    total: 0,
+    message: "",
+  });
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const hasStartedGenerationRef = useRef(false);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  // Convert outline slide to editor Slide format
+  const convertOutlineSlideToEditorSlide = (
+    outlineSlide: OutlineSlide,
+    index: number
+  ): Slide => {
+    const elements: SlideElement[] = [];
+    let zIndex = 1;
+
+    // Add title element
+    if (outlineSlide.title) {
+      const titleElement: TextElement = {
+        id: `slide-${index}-title`,
+        type: "text",
+        content: outlineSlide.title,
+        x: 100,
+        y: 100,
+        width: 1080,
+        height: 80,
+        fontSize: outlineSlide.layout === "title" ? 56 : 40,
+        color: "#000000",
+        fontWeight: "bold",
+        align: outlineSlide.layout === "title" ? "center" : "left",
+        zIndex: zIndex++,
+      };
+      elements.push(titleElement);
+    }
+
+    // Add content elements (bullet points)
+    if (outlineSlide.content && outlineSlide.content.length > 0) {
+      const startY = outlineSlide.layout === "title" ? 250 : 200;
+      const spacing = 60;
+      const fontSize = 24;
+      const lineHeight = 32;
+
+      outlineSlide.content.forEach((contentItem, contentIndex) => {
+        const contentElement: TextElement = {
+          id: `slide-${index}-content-${contentIndex}`,
+          type: "text",
+          content: contentItem,
+          x: 150,
+          y: startY + contentIndex * spacing,
+          width: 980,
+          height: lineHeight,
+          fontSize,
+          color: "#333333",
+          fontWeight: "normal",
+          align: "left",
+          zIndex: zIndex++,
+        };
+        elements.push(contentElement);
+      });
+    }
+
+    return {
+      id: `slide-${index}`,
+      background: "#ffffff",
+      elements,
+    };
+  };
+
+  // addToHistory needs to be defined early for use in handleStreamMessage
+  const addToHistory = useCallback(
+    (newSlides: Slide[]) => {
+      setHistory((prevHistory) => {
+        const newHistory = prevHistory.slice(0, historyIndex + 1);
+        newHistory.push(JSON.parse(JSON.stringify(newSlides)));
+        const newIndex = newHistory.length - 1;
+        setTimeout(() => setHistoryIndex(newIndex), 0);
+        return newHistory;
+      });
+    },
+    [historyIndex]
+  );
+
+  // Handle stream messages
+  const handleStreamMessage = useCallback(
+    (message: StreamMessage) => {
+      switch (message.type) {
+        case "progress":
+          setGenerationProgress({
+            current: message.current,
+            total: message.total,
+            message: message.message,
+          });
+          break;
+
+        case "slide":
+          // Convert and add slide - update in real-time
+          const editorSlide = convertOutlineSlideToEditorSlide(
+            message.slide,
+            message.slideIndex
+          );
+          setSlides((prev) => {
+            const newSlides = [...prev];
+            // Ensure array is large enough
+            while (newSlides.length <= message.slideIndex) {
+              newSlides.push({
+                id: `slide-${newSlides.length}`,
+                background: "#ffffff",
+                elements: [],
+              });
+            }
+            // Update the slide at the specific index
+            newSlides[message.slideIndex] = editorSlide;
+            // Force React to re-render by creating a new array reference
+            return [...newSlides];
+          });
+          // Auto-navigate to newly created slide (only for first slide)
+          setCurrentSlide((prev) => {
+            if (message.slideIndex === 0 && prev !== 0) {
+              return 0;
+            }
+            return prev;
+          });
+          // Auto-scroll to newly created slide in sidebar
+          setTimeout(() => {
+            const slideElement = document.querySelector(
+              `[data-slide-index="${message.slideIndex}"]`
+            );
+            if (slideElement) {
+              slideElement.scrollIntoView({
+                behavior: "smooth",
+                block: "nearest",
+              });
+            }
+          }, 100);
+          break;
+
+        case "complete":
+          setIsGenerating(false);
+          setGenerationProgress((prev) => ({
+            ...prev,
+            message: "Generation complete!",
+          }));
+          // Initialize history with final slides after a short delay to ensure state is updated
+          setTimeout(() => {
+            setSlides((currentSlides) => {
+              if (currentSlides.length > 0) {
+                addToHistory(currentSlides);
+              }
+              return currentSlides;
+            });
+          }, 100);
+          break;
+
+        case "error":
+          setError(message.error);
+          setIsGenerating(false);
+          break;
+      }
+    },
+    [addToHistory]
+  );
+
+  // Start streaming PPT generation
+  const startStreamingGeneration = useCallback(
+    async (pres: Presentation) => {
+      if (!pres.outline) {
+        setError("No outline available for generation");
+        return;
+      }
+
+      try {
+        setIsGenerating(true);
+        setIsLoading(false); // Stop showing loading state, start showing generation
+        setGenerationProgress({
+          current: 0,
+          total: pres.outline.slides.length,
+          message: "Starting generation...",
+        });
+        setError("");
+
+        // Create abort controller for cleanup
+        const abortController = new AbortController();
+        streamAbortControllerRef.current = abortController;
+
+        const response = await fetch("/api/presentation/generate-ppt-stream", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            presentationId: pres.id,
+            outline: pres.outline,
+          }),
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || "Failed to start generation");
+        }
+
+        // Parse streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) {
+          throw new Error("No response body");
+        }
+
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            console.log("Stream finished");
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete messages (SSE format: "data: {...}\n\n")
+          // Split by double newlines to get complete SSE messages
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() || ""; // Keep incomplete message in buffer
+
+          for (const part of parts) {
+            if (!part.trim()) continue;
+
+            // Handle SSE format: "data: {...}"
+            const lines = part.split("\n");
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const jsonStr = line.slice(6).trim();
+                  if (jsonStr) {
+                    const parsed: StreamMessage = JSON.parse(jsonStr);
+                    console.log(
+                      "Received stream message:",
+                      parsed.type,
+                      parsed
+                    );
+                    // Process immediately for real-time updates
+                    handleStreamMessage(parsed);
+                  }
+                } catch (parseError) {
+                  console.warn(
+                    "Failed to parse stream message:",
+                    line,
+                    parseError
+                  );
+                }
+              } else if (line.trim().startsWith("{")) {
+                // Try parsing as direct JSON (fallback)
+                try {
+                  const parsed: StreamMessage = JSON.parse(line.trim());
+                  console.log(
+                    "Received stream message (direct JSON):",
+                    parsed.type
+                  );
+                  handleStreamMessage(parsed);
+                } catch (parseError) {
+                  console.warn(
+                    "Failed to parse stream message:",
+                    line,
+                    parseError
+                  );
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          // User navigated away, ignore
+          return;
+        }
+        console.error("Error generating slides:", err);
+        setError(
+          err instanceof Error ? err.message : "Failed to generate slides"
+        );
+        setIsGenerating(false);
+        setIsLoading(false);
+      }
+    },
+    [handleStreamMessage]
+  );
+
+  // Fetch presentation data
+  useEffect(() => {
+    // Reset ref when presentationId changes
+    hasStartedGenerationRef.current = false;
+
+    const fetchPresentation = async () => {
+      if (!presentationId) return;
+
+      try {
+        setIsLoading(true);
+        const response = await fetch(`/api/presentation/${presentationId}`);
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch presentation");
+        }
+
+        const data = await response.json();
+        setPresentation(data);
+
+        // Set file name from presentation description
+        if (data.description) {
+          const fileWithName = {
+            name: data.description,
+          } as FileWithName;
+          setFile(fileWithName);
+        }
+
+        // Check if outline exists
+        if (!data.outline) {
+          setError("No outline found for this presentation");
+          setIsLoading(false);
+          return;
+        }
+
+        // Auto-start generation (only once)
+        if (!hasStartedGenerationRef.current) {
+          hasStartedGenerationRef.current = true;
+          startStreamingGeneration(data);
+        }
+      } catch (err) {
+        console.error("Error fetching presentation:", err);
+        setError(
+          err instanceof Error ? err.message : "Failed to load presentation"
+        );
+        setIsLoading(false);
+        hasStartedGenerationRef.current = false; // Reset on error
+      }
+    };
+
+    fetchPresentation();
+
+    // Cleanup on unmount
+    return () => {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+      }
+      hasStartedGenerationRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentationId]); // startStreamingGeneration intentionally excluded to prevent infinite loop
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -166,19 +559,6 @@ export default function GoogleSlidesEditor() {
       setError("Failed to process PowerPoint file");
     }
   };
-
-  const addToHistory = useCallback(
-    (newSlides: Slide[]) => {
-      setHistory((prevHistory) => {
-        const newHistory = prevHistory.slice(0, historyIndex + 1);
-        newHistory.push(JSON.parse(JSON.stringify(newSlides)));
-        const newIndex = newHistory.length - 1;
-        setTimeout(() => setHistoryIndex(newIndex), 0);
-        return newHistory;
-      });
-    },
-    [historyIndex]
-  );
 
   const undo = () => {
     if (historyIndex > 0) {
@@ -378,15 +758,147 @@ export default function GoogleSlidesEditor() {
     setComments([...comments, newComment]);
   };
 
-  const exportPresentation = () => {
-    const dataStr = JSON.stringify(slides, null, 2);
-    const dataBlob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "presentation-export.json";
-    link.click();
-    URL.revokeObjectURL(url);
+  const exportPresentation = async () => {
+    try {
+      const pres = new PptxGenJS();
+      pres.layout = "LAYOUT_WIDE"; // 16:9 aspect ratio
+
+      // Set presentation title from file name
+      if (file?.name) {
+        pres.title = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+      }
+
+      // Canvas dimensions in pixels (1280x720 for 16:9)
+      const canvasWidthPx = 1280;
+      const canvasHeightPx = 720;
+
+      // PPTX uses inches, and standard slide is 10" x 7.5" for 16:9
+      const slideWidthInches = 10;
+      const slideHeightInches = 7.5;
+
+      // Conversion factors
+      const pxToInchesX = slideWidthInches / canvasWidthPx;
+      const pxToInchesY = slideHeightInches / canvasHeightPx;
+
+      // Process each slide
+      for (const slide of slides) {
+        const pptxSlide = pres.addSlide();
+
+        // Set slide background color
+        if (slide.background && slide.background !== "#ffffff") {
+          const bgColor = slide.background.replace("#", "");
+          pptxSlide.background = { fill: bgColor };
+        }
+
+        // Sort elements by zIndex to maintain layering
+        const sortedElements = [...slide.elements].sort(
+          (a, b) => a.zIndex - b.zIndex
+        );
+
+        // Add each element to the slide
+        for (const element of sortedElements) {
+          if (element.type === "text") {
+            const textElement = element as TextElement;
+
+            // Convert pixel positions to inches
+            const x = textElement.x * pxToInchesX;
+            const y = textElement.y * pxToInchesY;
+            const w = textElement.width * pxToInchesX;
+            const h = textElement.height * pxToInchesY;
+
+            // Convert font size from px to points (1px ≈ 0.75pt)
+            const fontSizePt = textElement.fontSize * 0.75;
+
+            // Convert hex color to RGB (remove # if present)
+            const color = textElement.color.replace("#", "");
+
+            pptxSlide.addText(textElement.content, {
+              x,
+              y,
+              w,
+              h,
+              fontSize: fontSizePt,
+              color,
+              bold:
+                textElement.fontWeight === "bold" ||
+                textElement.fontWeight === "700",
+              align:
+                textElement.align === "left"
+                  ? "left"
+                  : textElement.align === "center"
+                    ? "center"
+                    : "right",
+            });
+          } else if (element.type === "shape") {
+            const shapeElement = element as ShapeElement;
+
+            // Convert pixel positions to inches
+            const x = shapeElement.x * pxToInchesX;
+            const y = shapeElement.y * pxToInchesY;
+            const w = shapeElement.width * pxToInchesX;
+            const h = shapeElement.height * pxToInchesY;
+
+            // Convert colors
+            const fillColor = shapeElement.color.replace("#", "");
+            const lineColor = shapeElement.borderColor.replace("#", "");
+            const lineWidth = shapeElement.borderWidth * pxToInchesX;
+
+            if (shapeElement.shapeType === "rectangle") {
+              pptxSlide.addShape(pres.ShapeType.rect, {
+                x,
+                y,
+                w,
+                h,
+                fill: { color: fillColor },
+                line: { color: lineColor, width: lineWidth },
+              });
+            } else if (shapeElement.shapeType === "circle") {
+              pptxSlide.addShape(pres.ShapeType.ellipse, {
+                x,
+                y,
+                w,
+                h,
+                fill: { color: fillColor },
+                line: { color: lineColor, width: lineWidth },
+              });
+            }
+          }
+        }
+      }
+
+      // Generate and download the PPTX file
+      const fileName = file?.name
+        ? file.name.replace(/\.[^/.]+$/, "") + ".pptx"
+        : "presentation.pptx";
+
+      // Generate base64 buffer
+      const base64Buffer = (await pres.write({
+        outputType: "base64",
+      })) as string;
+
+      // Convert base64 to blob and download
+      const byteCharacters = atob(base64Buffer);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], {
+        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error exporting presentation:", error);
+      setError("Failed to export presentation as PPTX");
+    }
   };
 
   useEffect(() => {
@@ -458,7 +970,70 @@ export default function GoogleSlidesEditor() {
 
   // Show properties panel when element is selected - handled in setSelectedElement calls
 
-  if (!file) {
+  // Show loading state
+  if (isLoading) {
+    return (
+      <>
+        <BreadcrumbHeader title="Create" href="/create" />
+        <PageLayout
+          title="Slides Editor"
+          description="Create and collaborate on presentations"
+        >
+          <div className="bg-card rounded-xl shadow-lg p-12 border flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+            <p className="text-muted-foreground">Loading presentation...</p>
+          </div>
+        </PageLayout>
+      </>
+    );
+  }
+
+  // Show error state
+  if (error && !isGenerating && slides.length === 0) {
+    return (
+      <>
+        <BreadcrumbHeader title="Create" href="/create" />
+        <PageLayout
+          title="Slides Editor"
+          description="Create and collaborate on presentations"
+        >
+          <div className="bg-card rounded-xl shadow-lg p-12 border">
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-center">
+              {error}
+            </div>
+          </div>
+        </PageLayout>
+      </>
+    );
+  }
+
+  // Show generating state (only if no slides yet and still generating)
+  // Once slides start appearing, show the editor even if still generating
+  if (isGenerating && slides.length === 0 && !error) {
+    return (
+      <>
+        <BreadcrumbHeader title="Create" href="/create" />
+        <PageLayout
+          title="Slides Editor"
+          description="Create and collaborate on presentations"
+        >
+          <div className="bg-card rounded-xl shadow-lg p-12 border flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+            <p className="text-lg font-semibold mb-2">
+              {generationProgress.message || "Generating slides..."}
+            </p>
+            {generationProgress.total > 0 && (
+              <p className="text-sm text-muted-foreground">
+                {generationProgress.current} / {generationProgress.total} slides
+              </p>
+            )}
+          </div>
+        </PageLayout>
+      </>
+    );
+  }
+
+  if (!file && slides.length === 0) {
     return (
       <>
         <BreadcrumbHeader title="Create" href="/create" />
@@ -497,191 +1072,194 @@ export default function GoogleSlidesEditor() {
   const currentSlideData = slides[currentSlide];
 
   return (
-    <div className="h-screen flex flex-col">
-      <BreadcrumbHeader hideSidebarTrigger title="Create" href="/create" />
-      <div className="flex flex-1 flex-col overflow-hidden bg-background">
-        {/* Top Toolbar */}
-        <div className="bg-card border-b border-border px-4 py-2 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <FileText className="w-6 h-6 text-primary" />
-              <div>
-                <input
-                  type="text"
-                  value={file.name}
-                  onChange={(e) => {
-                    if (file) {
-                      const newFile = Object.assign(file, {
-                        name: e.target.value,
-                      });
-                      setFile(newFile);
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex flex-1 flex-col min-h-0 bg-background">
+        {/* Compact Single-Row Toolbar */}
+        <div className="bg-card border-b border-border shrink-0">
+          <div className="flex items-center justify-between px-3 py-1.5 gap-3">
+            {/* Left Section - Navigation & Title */}
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <button
+                onClick={() => router.push("/")}
+                className="p-1.5 hover:bg-accent rounded transition-colors shrink-0"
+                title="Back to Dashboard"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="w-px h-5 bg-border"></div>
+              <FileText className="w-4 h-4 text-primary shrink-0" />
+              <input
+                type="text"
+                value={
+                  file?.name || presentation?.description || "Presentation"
+                }
+                onChange={(e) => {
+                  if (file) {
+                    const newFile = Object.assign(file, {
+                      name: e.target.value,
+                    });
+                    setFile(newFile);
+                  }
+                }}
+                className="font-medium bg-transparent border-none outline-none text-sm min-w-0 max-w-[220px] truncate"
+                placeholder="Presentation name"
+                title={
+                  file?.name || presentation?.description || "Presentation"
+                }
+              />
+              {isGenerating && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {generationProgress.current}/{generationProgress.total}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Middle Section - Editing Tools */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={undo}
+                disabled={historyIndex <= 0}
+                className="p-1.5 hover:bg-accent rounded disabled:opacity-30 transition-colors"
+                title="Undo"
+              >
+                <Undo className="w-4 h-4" />
+              </button>
+              <button
+                onClick={redo}
+                disabled={historyIndex >= history.length - 1}
+                className="p-1.5 hover:bg-accent rounded disabled:opacity-30 transition-colors"
+                title="Redo"
+              >
+                <Redo className="w-4 h-4" />
+              </button>
+
+              <div className="w-px h-4 bg-border mx-1"></div>
+
+              <button
+                onClick={addTextElement}
+                className="p-1.5 hover:bg-accent rounded transition-colors"
+                title="Add Text"
+              >
+                <Type className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => addShapeElement("rectangle")}
+                className="p-1.5 hover:bg-accent rounded transition-colors"
+                title="Rectangle"
+              >
+                <Square className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => addShapeElement("circle")}
+                className="p-1.5 hover:bg-accent rounded transition-colors"
+                title="Circle"
+              >
+                <Circle className="w-4 h-4" />
+              </button>
+
+              {selectedElement?.type === "text" && (
+                <>
+                  <div className="w-px h-4 bg-border mx-1"></div>
+                  <button
+                    className="p-1.5 hover:bg-accent rounded transition-colors"
+                    title="Bold"
+                  >
+                    <Bold className="w-4 h-4" />
+                  </button>
+                  <button
+                    className="p-1.5 hover:bg-accent rounded transition-colors"
+                    title="Italic"
+                  >
+                    <Italic className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateElement(selectedElement.id, { align: "left" })
                     }
-                  }}
-                  className="font-semibold bg-transparent border-none outline-none"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Last edited just now
-                </p>
-              </div>
+                    className="p-1.5 hover:bg-accent rounded transition-colors"
+                    title="Align Left"
+                  >
+                    <AlignLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateElement(selectedElement.id, { align: "center" })
+                    }
+                    className="p-1.5 hover:bg-accent rounded transition-colors"
+                    title="Align Center"
+                  >
+                    <AlignCenter className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      updateElement(selectedElement.id, { align: "right" })
+                    }
+                    className="p-1.5 hover:bg-accent rounded transition-colors"
+                    title="Align Right"
+                  >
+                    <AlignRight className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Collaborators */}
-              <div className="flex items-center gap-2 mr-4">
-                {collaborators.map((collab) => (
-                  <div key={collab.id} className="relative" title={collab.name}>
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold"
-                      style={{ backgroundColor: collab.color }}
-                    >
-                      {collab.name[0]}
-                    </div>
-                    {collab.active && (
-                      <div className="absolute bottom-0 right-0 w-2 h-2 bg-green-500 rounded-full border-2 border-card"></div>
-                    )}
-                  </div>
-                ))}
-                <button className="w-8 h-8 rounded-full bg-muted flex items-center justify-center hover:bg-accent">
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-
-              <button
-                onClick={() => setShowComments(!showComments)}
-                className="p-2 hover:bg-accent rounded-lg"
-              >
-                <MessageSquare className="w-5 h-5" />
-              </button>
-              <button
-                onClick={exportPresentation}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                Export
-              </button>
-              <button
-                onClick={handleReset}
-                className="p-2 hover:bg-accent rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Secondary Toolbar */}
-            <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-border">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={undo}
-                  disabled={historyIndex <= 0}
-                  className="p-2 hover:bg-accent rounded disabled:opacity-30"
-                  title="Undo"
-                >
-                  <Undo className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={redo}
-                  disabled={historyIndex >= history.length - 1}
-                  className="p-2 hover:bg-accent rounded disabled:opacity-30"
-                  title="Redo"
-                >
-                  <Redo className="w-5 h-5" />
-                </button>
-
-                <div className="w-px h-6 bg-border mx-2"></div>
-
-                <button
-                  onClick={addTextElement}
-                  className="px-3 py-2 hover:bg-accent rounded flex items-center gap-2"
-                >
-                  <Type className="w-5 h-5" />
-                  Text
-                </button>
-                <button
-                  onClick={() => addShapeElement("rectangle")}
-                  className="p-2 hover:bg-accent rounded"
-                  title="Rectangle"
-                >
-                  <Square className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => addShapeElement("circle")}
-                  className="p-2 hover:bg-accent rounded"
-                  title="Circle"
-                >
-                  <Circle className="w-5 h-5" />
-                </button>
-
-                {selectedElement?.type === "text" && (
-                  <>
-                    <div className="w-px h-6 bg-border mx-2"></div>
-                    <button className="p-2 hover:bg-accent rounded">
-                      <Bold className="w-5 h-5" />
-                    </button>
-                    <button className="p-2 hover:bg-accent rounded">
-                      <Italic className="w-5 h-5" />
-                    </button>
-                    <button className="p-2 hover:bg-accent rounded">
-                      <Underline className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateElement(selectedElement.id, { align: "left" })
-                      }
-                      className="p-2 hover:bg-accent rounded"
-                    >
-                      <AlignLeft className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateElement(selectedElement.id, { align: "center" })
-                      }
-                      className="p-2 hover:bg-accent rounded"
-                    >
-                      <AlignCenter className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() =>
-                        updateElement(selectedElement.id, { align: "right" })
-                      }
-                      className="p-2 hover:bg-accent rounded"
-                    >
-                      <AlignRight className="w-5 h-5" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Properties Panel */}
-          {selectedElement && (
-            <div className="bg-muted/30 border-b border-border px-4 py-2 shrink-0">
-              <div className="flex items-center gap-4">
-                {selectedElement.type === "text" && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Font:
-                      </label>
-                      <input
-                        type="range"
-                        min="12"
-                        max="96"
-                        value={selectedElement.fontSize}
-                        onChange={(e) =>
-                          updateElement(selectedElement.id, {
-                            fontSize: parseInt(e.target.value),
-                          })
-                        }
-                        className="w-24 h-1"
-                      />
-                      <span className="text-xs text-foreground w-8">
-                        {selectedElement.fontSize}px
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Color:
-                      </label>
+            {/* Right Section - Actions */}
+            <div className="flex items-center gap-1 shrink-0">
+              {selectedElement && (
+                <>
+                  {selectedElement.type === "text" && (
+                    <>
+                      <div className="flex items-center gap-0.5 bg-muted rounded px-1">
+                        <button
+                          onClick={() =>
+                            updateElement(selectedElement.id, {
+                              fontSize: Math.max(
+                                12,
+                                selectedElement.fontSize - 2
+                              ),
+                            })
+                          }
+                          className="p-0.5 hover:bg-accent rounded transition-colors"
+                          title="Decrease font size"
+                        >
+                          <span className="text-sm font-medium">−</span>
+                        </button>
+                        <input
+                          type="number"
+                          min="12"
+                          max="96"
+                          value={selectedElement.fontSize}
+                          onChange={(e) =>
+                            updateElement(selectedElement.id, {
+                              fontSize: Math.max(
+                                12,
+                                Math.min(96, parseInt(e.target.value) || 12)
+                              ),
+                            })
+                          }
+                          className="w-10 bg-transparent border-none outline-none text-center text-sm"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          px
+                        </span>
+                        <button
+                          onClick={() =>
+                            updateElement(selectedElement.id, {
+                              fontSize: Math.min(
+                                96,
+                                selectedElement.fontSize + 2
+                              ),
+                            })
+                          }
+                          className="p-0.5 hover:bg-accent rounded transition-colors"
+                          title="Increase font size"
+                        >
+                          <span className="text-sm font-medium">+</span>
+                        </button>
+                      </div>
                       <input
                         type="color"
                         value={selectedElement.color}
@@ -690,18 +1268,13 @@ export default function GoogleSlidesEditor() {
                             color: e.target.value,
                           })
                         }
-                        className="w-8 h-8 rounded cursor-pointer border border-border"
+                        className="w-7 h-7 rounded cursor-pointer border border-border"
+                        title="Text color"
                       />
-                    </div>
-                  </>
-                )}
-
-                {selectedElement.type === "shape" && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Fill:
-                      </label>
+                    </>
+                  )}
+                  {selectedElement.type === "shape" && (
+                    <>
                       <input
                         type="color"
                         value={selectedElement.color}
@@ -710,13 +1283,9 @@ export default function GoogleSlidesEditor() {
                             color: e.target.value,
                           })
                         }
-                        className="w-8 h-8 rounded cursor-pointer border border-border"
+                        className="w-7 h-7 rounded cursor-pointer border border-border"
+                        title="Fill color"
                       />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Border:
-                      </label>
                       <input
                         type="color"
                         value={selectedElement.borderColor}
@@ -725,66 +1294,151 @@ export default function GoogleSlidesEditor() {
                             borderColor: e.target.value,
                           })
                         }
-                        className="w-8 h-8 rounded cursor-pointer border border-border"
+                        className="w-7 h-7 rounded cursor-pointer border border-border"
+                        title="Border color"
                       />
-                    </div>
-                  </>
-                )}
-
-                <div className="w-px h-6 bg-border mx-2"></div>
-
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Slide BG:
-                  </label>
-                  <input
-                    type="color"
-                    value={currentSlideData?.background}
-                    onChange={(e) => updateSlideBackground(e.target.value)}
-                    className="w-8 h-8 rounded cursor-pointer border border-border"
-                  />
-                </div>
-
-                <div className="flex-1"></div>
-
-                <button
-                  onClick={() => deleteElement(selectedElement.id)}
-                  className="flex items-center gap-1.5 px-2 py-1 text-xs bg-destructive/10 text-destructive rounded hover:bg-destructive/20 transition-colors"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  Delete
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-1 overflow-hidden">
-            {/* Left Sidebar - Slides */}
-            <div className="w-64 bg-card border-r border-border overflow-y-auto p-4 shrink-0">
-              <div className="space-y-3">
-                {slides.map((slide, index) => (
-                  <div
-                    key={slide.id}
-                    onClick={() => {
-                      setCurrentSlide(index);
-                      setSelectedElement(null);
-                    }}
-                    className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
-                      currentSlide === index
-                        ? "border-primary shadow-lg"
-                        : "border-border hover:border-primary/50"
-                    }`}
+                    </>
+                  )}
+                  <button
+                    onClick={() => deleteElement(selectedElement.id)}
+                    className="p-1.5 hover:bg-destructive/10 text-destructive rounded transition-colors"
+                    title="Delete element"
                   >
-                    <div
-                      className="aspect-video text-xs p-2"
-                      style={{ backgroundColor: slide.background || "#ffffff" }}
-                    >
-                      <div className="text-gray-900 font-semibold">
-                        {index + 1}
-                      </div>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <div className="w-px h-4 bg-border mx-1"></div>
+                </>
+              )}
+              <button
+                onClick={exportPresentation}
+                className="px-3 py-1.5 bg-primary text-primary-foreground rounded text-sm hover:bg-primary/90 transition-colors font-medium"
+              >
+                Export
+              </button>
+              <button
+                onClick={handleReset}
+                className="p-1.5 hover:bg-accent rounded transition-colors"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Content Area with Sidebar and Canvas */}
+        <div className="flex flex-1 overflow-hidden min-h-0">
+          {/* Left Sidebar - Slides */}
+          <div className="w-64 bg-card border-r border-border overflow-y-auto p-3 shrink-0">
+            <div className="space-y-2">
+              {slides.map((slide, index) => (
+                <div
+                  key={slide.id}
+                  data-slide-index={index}
+                  onClick={() => {
+                    setCurrentSlide(index);
+                    setSelectedElement(null);
+                  }}
+                  className={`relative cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                    currentSlide === index
+                      ? "border-primary shadow-lg"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <div
+                    className="aspect-video relative"
+                    style={{
+                      backgroundColor: slide.background || "#ffffff",
+                    }}
+                  >
+                    {/* Slide number badge */}
+                    <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded font-medium z-10">
+                      {index + 1}
+                    </div>
+
+                    {/* Render slide elements at scale */}
+                    <div className="w-full h-full relative overflow-hidden">
+                      {slide.elements.map((element) => {
+                        // Scale factor for thumbnail (aspect-video gives us ~16:9)
+                        const scaleX = 100 / (canvasSize.width || 1280); // percentage
+                        const scaleY = 100 / (canvasSize.height || 720); // percentage
+
+                        return (
+                          <div
+                            key={element.id}
+                            className="absolute"
+                            style={{
+                              left: `${element.x * scaleX}%`,
+                              top: `${element.y * scaleY}%`,
+                              width: element.width
+                                ? `${element.width * scaleX}%`
+                                : "auto",
+                              height: element.height
+                                ? `${element.height * scaleY}%`
+                                : "auto",
+                              fontSize:
+                                element.type === "text"
+                                  ? `${Math.max(4, element.fontSize * scaleX * 0.6)}px`
+                                  : undefined,
+                              color:
+                                element.type === "text"
+                                  ? element.color
+                                  : undefined,
+                              fontWeight:
+                                element.type === "text"
+                                  ? element.fontWeight
+                                  : undefined,
+                              textAlign:
+                                element.type === "text"
+                                  ? element.align
+                                  : undefined,
+                              backgroundColor:
+                                element.type === "shape"
+                                  ? element.color
+                                  : undefined,
+                              border:
+                                element.type === "shape"
+                                  ? `${Math.max(0.5, (element.borderWidth || 0) * scaleX)}px solid ${element.borderColor}`
+                                  : undefined,
+                              borderRadius:
+                                element.type === "shape" &&
+                                element.shapeType === "rectangle"
+                                  ? "2px"
+                                  : element.type === "shape" &&
+                                      element.shapeType === "circle"
+                                    ? "50%"
+                                    : undefined,
+                              overflow: "hidden",
+                              whiteSpace:
+                                element.type === "text" ? "nowrap" : undefined,
+                              textOverflow:
+                                element.type === "text"
+                                  ? "ellipsis"
+                                  : undefined,
+                            }}
+                          >
+                            {element.type === "text" && element.content}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                ))}
+                  {isGenerating && index === slides.length - 1 && (
+                    <div className="absolute inset-0 bg-primary/10 flex items-center justify-center">
+                      <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {isGenerating && generationProgress.total > slides.length && (
+                <div className="w-full aspect-video border-2 border-dashed border-border rounded-lg flex flex-col items-center justify-center bg-muted/50">
+                  <Loader2 className="w-6 h-6 text-muted-foreground animate-spin mb-2" />
+                  <span className="text-xs text-muted-foreground">
+                    Generating...
+                  </span>
+                </div>
+              )}
+              {!isGenerating && (
                 <button
                   onClick={addNewSlide}
                   className="w-full aspect-video border-2 border-dashed border-border rounded-lg flex items-center justify-center hover:border-primary hover:bg-accent transition-all"
@@ -792,136 +1446,107 @@ export default function GoogleSlidesEditor() {
                 >
                   <Plus className="w-6 h-6 text-muted-foreground" />
                 </button>
-              </div>
+              )}
             </div>
+          </div>
 
-            {/* Main Canvas */}
-            <div
-              ref={canvasContainerRef}
-              className="flex-1 p-8 overflow-auto flex items-center justify-center"
-            >
-              <div className="w-full flex items-center justify-center">
+          {/* Main Canvas */}
+          <div
+            ref={canvasContainerRef}
+            className="flex-1 overflow-auto min-h-0"
+          >
+            <div className="w-full h-full flex items-center justify-center p-4">
+              <div
+                className="rounded-lg shadow-2xl overflow-hidden border border-border"
+                style={{ backgroundColor: "#ffffff" }}
+              >
                 <div
-                  className="rounded-lg shadow-2xl overflow-hidden border border-border"
-                  style={{ backgroundColor: "#ffffff" }}
+                  ref={canvasRef}
+                  className="relative cursor-default"
+                  style={{
+                    width: `${canvasSize.width || 1280}px`,
+                    height: `${canvasSize.height || 720}px`,
+                    backgroundColor: currentSlideData?.background || "#ffffff",
+                  }}
+                  onClick={() => {
+                    setSelectedElement(null);
+                  }}
                 >
-                  <div
-                    ref={canvasRef}
-                    className="relative cursor-default"
-                    style={{
-                      width: `${canvasSize.width || 1280}px`,
-                      height: `${canvasSize.height || 720}px`,
-                      backgroundColor:
-                        currentSlideData?.background || "#ffffff",
-                    }}
-                    onClick={() => {
-                      setSelectedElement(null);
-                    }}
-                  >
-                    {currentSlideData?.elements
-                      .sort(
-                        (a: SlideElement, b: SlideElement) =>
-                          a.zIndex - b.zIndex
-                      )
-                      .map((element: SlideElement) => (
-                        <div
-                          key={element.id}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            handleMouseDown(e, element);
-                          }}
-                          className={`absolute ${
-                            selectedElement?.id === element.id
-                              ? "ring-2 ring-blue-500"
-                              : ""
-                          }`}
-                          style={{
-                            left: `${element.x}px`,
-                            top: `${element.y}px`,
-                            width: element.width
-                              ? `${element.width}px`
-                              : "auto",
-                            height: element.height
-                              ? `${element.height}px`
-                              : "auto",
-                            cursor: "move",
-                          }}
-                        >
-                          {element.type === "text" ? (
+                  {currentSlideData?.elements
+                    .sort(
+                      (a: SlideElement, b: SlideElement) => a.zIndex - b.zIndex
+                    )
+                    .map((element: SlideElement) => (
+                      <div
+                        key={element.id}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          handleMouseDown(e, element);
+                        }}
+                        className={`absolute ${
+                          selectedElement?.id === element.id
+                            ? "ring-2 ring-blue-500"
+                            : ""
+                        }`}
+                        style={{
+                          left: `${element.x}px`,
+                          top: `${element.y}px`,
+                          width: element.width ? `${element.width}px` : "auto",
+                          height: element.height
+                            ? `${element.height}px`
+                            : "auto",
+                          cursor: "move",
+                        }}
+                      >
+                        {element.type === "text" ? (
+                          <div
+                            contentEditable={selectedElement?.id === element.id}
+                            suppressContentEditableWarning
+                            onBlur={(e) =>
+                              updateElement(element.id, {
+                                content: (e.target as HTMLElement).innerText,
+                              })
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              fontSize: `${element.fontSize}px`,
+                              color: element.color,
+                              fontWeight: element.fontWeight,
+                              textAlign: element.align,
+                              width: "100%",
+                              height: "100%",
+                              outline: "none",
+                              padding: "8px",
+                            }}
+                            className="cursor-text"
+                          >
+                            {element.content}
+                          </div>
+                        ) : element.type === "shape" ? (
+                          element.shapeType === "rectangle" ? (
                             <div
-                              contentEditable={
-                                selectedElement?.id === element.id
-                              }
-                              suppressContentEditableWarning
-                              onBlur={(e) =>
-                                updateElement(element.id, {
-                                  content: (e.target as HTMLElement).innerText,
-                                })
-                              }
-                              onClick={(e) => e.stopPropagation()}
                               style={{
-                                fontSize: `${element.fontSize}px`,
-                                color: element.color,
-                                fontWeight: element.fontWeight,
-                                textAlign: element.align,
                                 width: "100%",
                                 height: "100%",
-                                outline: "none",
-                                padding: "8px",
+                                backgroundColor: element.color,
+                                border: `${element.borderWidth}px solid ${element.borderColor}`,
+                                borderRadius: "8px",
                               }}
-                              className="cursor-text"
-                            >
-                              {element.content}
-                            </div>
-                          ) : element.type === "shape" ? (
-                            element.shapeType === "rectangle" ? (
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  backgroundColor: element.color,
-                                  border: `${element.borderWidth}px solid ${element.borderColor}`,
-                                  borderRadius: "8px",
-                                }}
-                              />
-                            ) : (
-                              <div
-                                style={{
-                                  width: "100%",
-                                  height: "100%",
-                                  backgroundColor: element.color,
-                                  border: `${element.borderWidth}px solid ${element.borderColor}`,
-                                  borderRadius: "50%",
-                                }}
-                              />
-                            )
-                          ) : null}
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Navigation */}
-                <div className="flex items-center justify-center gap-4 mt-6">
-                  <button
-                    onClick={handlePrevSlide}
-                    disabled={currentSlide === 0}
-                    className="p-2 bg-card rounded-full shadow hover:shadow-lg disabled:opacity-30 transition-all border border-border"
-                  >
-                    <ChevronLeft className="w-6 h-6" />
-                  </button>
-
-                  <span className="font-medium">
-                    {currentSlide + 1} / {slides.length}
-                  </span>
-
-                  <button
-                    onClick={handleNextSlide}
-                    disabled={currentSlide === slides.length - 1}
-                    className="p-2 bg-card rounded-full shadow hover:shadow-lg disabled:opacity-30 transition-all border border-border"
-                  >
-                    <ChevronRight className="w-6 h-6" />
-                  </button>
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                backgroundColor: element.color,
+                                border: `${element.borderWidth}px solid ${element.borderColor}`,
+                                borderRadius: "50%",
+                              }}
+                            />
+                          )
+                        ) : null}
+                      </div>
+                    ))}
                 </div>
               </div>
             </div>
