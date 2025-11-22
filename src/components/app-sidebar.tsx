@@ -2,22 +2,21 @@
 
 import {
   AudioWaveform,
-  BookOpen,
-  Bot,
   Command,
   Frame,
   GalleryVerticalEnd,
   Map,
   PieChart,
-  Settings2,
-  SquareTerminal,
   LayoutDashboard,
   Presentation,
   Library,
   Users,
   Plug,
   CreditCard,
+  PlusIcon,
+  PlusCircleIcon,
 } from "lucide-react";
+import NextLink from "next/link";
 import * as React from "react";
 
 import { NavMain } from "@/components/nav-main";
@@ -27,11 +26,15 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { TeamSwitcher } from "@/components/team-switcher";
 import { WorkspaceSwitcherWrapper } from "@/components/workspace-switcher";
+import { cn } from "@/lib/utils";
 
 const data = {
   user: {
@@ -116,6 +119,24 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <WorkspaceSwitcherWrapper />
       </SidebarHeader>
       <SidebarContent>
+        <SidebarGroup className="pb-0 mt-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Create">
+                <NextLink
+                  href="/create"
+                  className={cn(
+                    "justify-center",
+                    "bg-sidebar-primary hover:bg-sidebar-primary/90"
+                  )}
+                >
+                  <span>Create</span>
+                  <PlusCircleIcon />
+                </NextLink>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
         <NavMain items={data.navMain} />
         <NavProjects projects={data.projects} />
       </SidebarContent>
