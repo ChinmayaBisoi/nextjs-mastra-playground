@@ -7,7 +7,15 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
-function BreadcrumbHeader({ title, href }: { title: string; href: string }) {
+function BreadcrumbHeader({
+  hideSidebarTrigger = false,
+  title,
+  href,
+}: {
+  hideSidebarTrigger?: boolean;
+  title: string;
+  href: string;
+}) {
   return (
     <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
       <div className="flex items-center gap-2 px-4">
