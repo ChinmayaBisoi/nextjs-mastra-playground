@@ -3,18 +3,17 @@
 import {
   AudioWaveform,
   Command,
+  CreditCard,
   Frame,
   GalleryVerticalEnd,
+  LayoutDashboard,
+  Library,
   Map,
   PieChart,
-  LayoutDashboard,
-  Presentation,
-  Library,
-  Users,
   Plug,
-  CreditCard,
-  PlusIcon,
   PlusCircleIcon,
+  Presentation,
+  Users,
 } from "lucide-react";
 import NextLink from "next/link";
 import * as React from "react";

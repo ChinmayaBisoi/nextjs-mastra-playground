@@ -1,28 +1,33 @@
 "use client";
 
-import { useState } from "react";
 import { PresentationInput } from "@/components/presentation-input";
 import { SlideCountSelector } from "@/components/presentation/create/slide-count-selector";
 import { WebSearchToggle } from "@/components/presentation/create/web-search-toggle";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useState } from "react";
+import { toast } from "sonner";
+
+type PresentationFormInput = {
+  description: string;
+  slideCount: number;
+  webSearchEnabled: boolean;
+};
 
 export function PresentationForm() {
-  const [description, setDescription] = useState("");
   const [slideCount, setSlideCount] = useState(8);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
-  const handleSubmit = () => {
-    const formData = {
-      description,
-      slideCount,
-      webSearchEnabled,
-    };
+  const handleSubmit = (formData: PresentationFormInput) => {
     console.log("Presentation Form Data:", formData);
   };
 
   const handleDescriptionSubmit = (value: string) => {
-    setDescription(value);
+    if (!value.trim()) {
+      toast.error("Please enter a valid description");
+      return;
+    }
+
+    handleSubmit({ description: value, slideCount, webSearchEnabled });
   };
 
   return (
@@ -62,18 +67,6 @@ export function PresentationForm() {
       </div>
 
       <Separator />
-
-      {/* Submit Button */}
-      <div className="flex justify-end">
-        <Button
-          size="lg"
-          onClick={handleSubmit}
-          disabled={!description.trim()}
-          className="min-w-[200px]"
-        >
-          Generate Presentation
-        </Button>
-      </div>
     </div>
   );
 }

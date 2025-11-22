@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
-import { ArrowUp, Paperclip } from "lucide-react";
+import ComingSoonTooltip from "@/components/coming-soon.tooltip";
 import { cn } from "@/lib/utils";
+import { ArrowUp, Paperclip } from "lucide-react";
+import React, { useEffect } from "react";
 
 interface PresentationInputProps {
   onSubmit?: (value: string) => void;
@@ -62,6 +63,10 @@ export function PresentationInput({
     console.log("Import from Figma");
   };
 
+  useEffect(() => {
+    fileInputRef?.current?.focus();
+  }, []);
+
   return (
     <div
       className={cn(
@@ -103,24 +108,30 @@ export function PresentationInput({
                   onChange={handleFileChange}
                   multiple
                 />
-                <button
-                  type="button"
-                  onClick={handleFileClick}
-                  className="relative flex items-center justify-center cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 w-[26px] h-[26px] rounded-md transition-colors"
-                  aria-label="Attach"
-                >
-                  <div className="w-full flex items-center justify-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <div className="w-[16px] h-[16px] flex justify-center items-center">
-                        <Paperclip className="w-4 h-4" />
+                <ComingSoonTooltip>
+                  <button
+                    type="button"
+                    onClick={handleFileClick}
+                    disabled={true}
+                    className={cn(
+                      "relative flex items-center justify-center cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-black dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700 w-[26px] h-[26px] rounded-md transition-colors",
+                      "disabled:opacity-50 disabled:cursor-not-allowed"
+                    )}
+                    aria-label="Attach"
+                  >
+                    <div className="w-full flex items-center justify-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <div className="w-[16px] h-[16px] flex justify-center items-center">
+                          <Paperclip className="w-4 h-4" />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                </ComingSoonTooltip>
               </div>
 
               {/* Import Button - Hidden on mobile */}
-              <div className="max-sm:hidden">
+              {/* <div className="max-sm:hidden">
                 <button
                   type="button"
                   onClick={handleImport}
@@ -130,7 +141,6 @@ export function PresentationInput({
                   <div className="w-full flex items-center justify-center">
                     <div className="flex items-center justify-center gap-1">
                       <span className="w-[16px] h-[16px] flex items-center">
-                        {/* Figma Icon */}
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
                           viewBox="0 0 200 300"
@@ -168,7 +178,7 @@ export function PresentationInput({
                     </div>
                   </div>
                 </button>
-              </div>
+              </div> */}
             </div>
           </div>
         </div>
