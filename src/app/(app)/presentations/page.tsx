@@ -7,6 +7,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 
+export const dynamic = "force-dynamic";
+
 async function getPresentations() {
   try {
     const { userId } = await auth();
@@ -132,7 +134,10 @@ async function PresentationsList() {
         const timeAgo = formatTimeAgo(updatedAt);
 
         return (
-          <Link key={presentation.id} href={`/presentations/${presentation.id}`}>
+          <Link
+            key={presentation.id}
+            href={`/presentations/${presentation.id}`}
+          >
             <Card className="hover:shadow-lg transition-shadow cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-start justify-between gap-2">
