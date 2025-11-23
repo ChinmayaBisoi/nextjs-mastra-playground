@@ -42,6 +42,66 @@ function createStreamMessage(message: StreamMessage): string {
   return `data: ${JSON.stringify(message)}\n\n`;
 }
 
+// Helper function to convert outline slide to editor slide format
+function convertOutlineSlideToEditorSlide(
+  outlineSlide: z.infer<typeof slideSchema>,
+  index: number
+) {
+  const elements: any[] = [];
+  let zIndex = 1;
+
+  // Add title element
+  if (outlineSlide.title) {
+    const titleElement = {
+      id: `slide-${index}-title`,
+      type: "text",
+      content: outlineSlide.title,
+      x: 100,
+      y: 100,
+      width: 1080,
+      height: 80,
+      fontSize: outlineSlide.layout === "title" ? 56 : 40,
+      color: "#000000",
+      fontWeight: "bold",
+      align: outlineSlide.layout === "title" ? "center" : "left",
+      zIndex: zIndex++,
+    };
+    elements.push(titleElement);
+  }
+
+  // Add content elements (bullet points)
+  if (outlineSlide.content && outlineSlide.content.length > 0) {
+    const startY = outlineSlide.layout === "title" ? 250 : 200;
+    const spacing = 60;
+    const fontSize = 24;
+    const lineHeight = 32;
+
+    outlineSlide.content.forEach((contentItem, contentIndex) => {
+      const contentElement = {
+        id: `slide-${index}-content-${contentIndex}`,
+        type: "text",
+        content: contentItem,
+        x: 150,
+        y: startY + contentIndex * spacing,
+        width: 980,
+        height: lineHeight,
+        fontSize,
+        color: "#333333",
+        fontWeight: "normal",
+        align: "left",
+        zIndex: zIndex++,
+      };
+      elements.push(contentElement);
+    });
+  }
+
+  return {
+    id: `slide-${index}`,
+    background: "#ffffff",
+    elements,
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const { userId } = await auth();
@@ -183,7 +243,12 @@ export async function POST(req: Request) {
 
 The presentation has ${totalSlides} slides. Create a cohesive visual theme with appropriate colors, fonts, and spacing, and design optimal layouts for each slide type.`;
 
-              const themeResponse = await layoutThemeAgent.generate(
+              // Add timeout to prevent hanging - skip theme generation if it takes too long
+              const timeoutPromise = new Promise<null>((resolve) =>
+                setTimeout(() => resolve(null), 10000)
+              );
+
+              const themeGenerationPromise = layoutThemeAgent.generate(
                 [{ role: "user", content: themePrompt }],
                 {
                   structuredOutput: {
@@ -212,6 +277,11 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                   },
                 }
               );
+
+              const themeResponse = await Promise.race([
+                themeGenerationPromise,
+                timeoutPromise,
+              ]);
 
               // Safely check for theme response
               if (
@@ -530,6 +600,35 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
 
             if (slide.notes) {
               pptxSlide.addNotes(slide.notes);
+            }
+
+            // Convert outline slide to editor format and save to database
+            const editorSlide = convertOutlineSlideToEditorSlide(
+              slide,
+              slideIndex
+            );
+
+            // Save slide to database
+            try {
+              await prisma.slide.upsert({
+                where: {
+                  presentationId_order: {
+                    presentationId: presentationId,
+                    order: slideIndex,
+                  },
+                },
+                create: {
+                  presentationId: presentationId,
+                  order: slideIndex,
+                  data: editorSlide as Prisma.InputJsonValue,
+                },
+                update: {
+                  data: editorSlide as Prisma.InputJsonValue,
+                },
+              });
+            } catch (dbError) {
+              console.error("Failed to save slide to database:", dbError);
+              // Continue with streaming even if DB save fails
             }
 
             // Stream the slide data (with error handling)

@@ -157,6 +157,41 @@ export default function GoogleSlidesEditor() {
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Save slides to database (debounced)
+  const saveSlidesToDB = useCallback(
+    async (slidesToSave: Slide[]) => {
+      if (!presentationId) return;
+
+      try {
+        await fetch(`/api/presentation/${presentationId}/slides`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ slides: slidesToSave }),
+        });
+      } catch (err) {
+        console.error("Failed to save slides:", err);
+      }
+    },
+    [presentationId]
+  );
+
+  // Debounced save function
+  const debouncedSave = useCallback(
+    (slidesToSave: Slide[]) => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+
+      saveTimerRef.current = setTimeout(() => {
+        saveSlidesToDB(slidesToSave);
+      }, 1000); // 1 second debounce
+    },
+    [saveSlidesToDB]
+  );
 
   // Convert outline slide to editor Slide format
   const convertOutlineSlideToEditorSlide = (
@@ -437,23 +472,33 @@ export default function GoogleSlidesEditor() {
     [handleStreamMessage]
   );
 
-  // Fetch presentation data
+  // Handler to manually start slide generation
+  const handleStartGeneration = useCallback(() => {
+    if (presentation && !hasStartedGenerationRef.current) {
+      hasStartedGenerationRef.current = true;
+      startStreamingGeneration(presentation);
+    }
+  }, [presentation, startStreamingGeneration]);
+
+  // Fetch presentation data and slides
   useEffect(() => {
     // Reset ref when presentationId changes
     hasStartedGenerationRef.current = false;
 
-    const fetchPresentation = async () => {
+    const fetchPresentationAndSlides = async () => {
       if (!presentationId) return;
 
       try {
         setIsLoading(true);
-        const response = await fetch(`/api/presentation/${presentationId}`);
 
-        if (!response.ok) {
+        // Fetch presentation data
+        const presResponse = await fetch(`/api/presentation/${presentationId}`);
+
+        if (!presResponse.ok) {
           throw new Error("Failed to fetch presentation");
         }
 
-        const data = await response.json();
+        const data = await presResponse.json();
         setPresentation(data);
 
         // Set file name from presentation description
@@ -471,22 +516,40 @@ export default function GoogleSlidesEditor() {
           return;
         }
 
-        // Auto-start generation (only once)
-        if (!hasStartedGenerationRef.current) {
-          hasStartedGenerationRef.current = true;
-          startStreamingGeneration(data);
+        // Fetch existing slides
+        const slidesResponse = await fetch(
+          `/api/presentation/${presentationId}/slides`
+        );
+
+        if (slidesResponse.ok) {
+          const existingSlides = await slidesResponse.json();
+
+          if (existingSlides && existingSlides.length > 0) {
+            // Load existing slides from database
+            const loadedSlides = existingSlides.map(
+              (dbSlide: { data: Slide }) => dbSlide.data
+            );
+            setSlides(loadedSlides);
+            setCurrentSlide(0);
+            addToHistory(loadedSlides);
+            setIsLoading(false);
+            return;
+          }
         }
+
+        // No slides exist - show generation button (don't auto-start)
+        setIsLoading(false);
       } catch (err) {
         console.error("Error fetching presentation:", err);
         setError(
           err instanceof Error ? err.message : "Failed to load presentation"
         );
         setIsLoading(false);
-        hasStartedGenerationRef.current = false; // Reset on error
+        hasStartedGenerationRef.current = false;
       }
     };
 
-    fetchPresentation();
+    fetchPresentationAndSlides();
 
     // Cleanup on unmount
     return () => {
@@ -496,7 +559,7 @@ export default function GoogleSlidesEditor() {
       hasStartedGenerationRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presentationId]); // startStreamingGeneration intentionally excluded to prevent infinite loop
+  }, [presentationId]); // addToHistory intentionally excluded to prevent infinite loop
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -578,8 +641,10 @@ export default function GoogleSlidesEditor() {
     (updatedSlides: Slide[]) => {
       setSlides(updatedSlides);
       addToHistory(updatedSlides);
+      // Auto-save to database with debounce
+      debouncedSave(updatedSlides);
     },
-    [addToHistory]
+    [addToHistory, debouncedSave]
   );
 
   const handlePrevSlide = () => {
@@ -1026,6 +1091,48 @@ export default function GoogleSlidesEditor() {
               <p className="text-sm text-muted-foreground">
                 {generationProgress.current} / {generationProgress.total} slides
               </p>
+            )}
+          </div>
+        </PageLayout>
+      </>
+    );
+  }
+
+  // Show generate slides button when presentation exists but no slides yet
+  if (presentation && slides.length === 0 && !isGenerating) {
+    return (
+      <>
+        <BreadcrumbHeader title="Create" href="/create" />
+        <PageLayout
+          title="Slides Editor"
+          description="Create and collaborate on presentations"
+        >
+          <div className="bg-card rounded-xl shadow-lg p-12 border">
+            <div className="flex flex-col items-center justify-center p-16">
+              <FileText className="w-16 h-16 text-primary mb-4" />
+              <h2 className="text-2xl font-semibold mb-2">
+                {presentation.description}
+              </h2>
+              <p className="text-muted-foreground mb-2">
+                {presentation.slideCount} slides outlined
+              </p>
+              {presentation.outline && (
+                <p className="text-sm text-muted-foreground mb-6">
+                  Outline ready • Click below to generate slides
+                </p>
+              )}
+              <button
+                onClick={handleStartGeneration}
+                className="px-6 py-3 bg-primary text-primary-foreground rounded-lg text-lg hover:bg-primary/90 transition-colors font-medium"
+              >
+                Generate Slides
+              </button>
+            </div>
+
+            {error && (
+              <div className="mt-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-center">
+                {error}
+              </div>
             )}
           </div>
         </PageLayout>

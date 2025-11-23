@@ -37,6 +37,20 @@ model Presentation {
   pptFileUrl       String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+  slides           Slide[]
 
   @@index([userId])
+}
+
+model Slide {
+  id             String       @id @default(cuid())
+  presentationId String
+  order          Int
+  data           Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  presentation   Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+
+  @@unique([presentationId, order])
+  @@index([presentationId])
 }
