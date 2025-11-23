@@ -159,25 +159,16 @@ export async function POST(req: Request) {
 
           if (layoutThemeAgent) {
             try {
-              // Check if controller is still open before enqueuing
-              try {
-                controller.enqueue(
-                  encoder.encode(
-                    createStreamMessage({
-                      type: "progress",
-                      current: 0,
-                      total: totalSlides,
-                      message: "Generating layout theme...",
-                    })
-                  )
-                );
-              } catch (enqueueError) {
-                // Controller might be closed, log and continue
-                console.warn(
-                  "Could not enqueue progress message:",
-                  enqueueError
-                );
-              }
+              controller.enqueue(
+                encoder.encode(
+                  createStreamMessage({
+                    type: "progress",
+                    current: 0,
+                    total: totalSlides,
+                    message: "Generating layout theme...",
+                  })
+                )
+              );
 
               const themePrompt = `Design a professional layout and theme for this presentation about: "${title}"
 
@@ -213,20 +204,12 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                 }
               );
 
-              // Safely check for theme response
-              if (
-                themeResponse?.object &&
-                typeof themeResponse.object === "object"
-              ) {
+              if (themeResponse.object) {
                 layoutTheme = themeResponse.object;
-              } else {
-                console.warn(
-                  "Layout theme response was invalid, using defaults"
-                );
               }
             } catch (error) {
               console.error("Failed to generate layout theme:", error);
-              // Continue with default theme - don't let this stop the generation
+              // Continue with default theme
             }
           }
 
@@ -240,52 +223,29 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
           const theme = layoutTheme?.theme;
           const layouts = layoutTheme?.layouts;
 
-          // Ensure colors are in correct format (PptxGenJS expects hex without #)
-          // Use theme colors from API if provided, otherwise use design system defaults
-          // Design system: foreground (text) = oklch(0.145 0 0) ≈ #252525, background = white = #FFFFFF
-          const primaryColor =
-            theme?.primaryColor?.replace("#", "") || "252525";
+          const primaryColor = theme?.primaryColor?.replace("#", "") || "363636";
           const headingFont = theme?.headingFont || "Calibri";
           const bodyFont = theme?.bodyFont || "Calibri";
-          // Use theme text color if provided, otherwise use design system foreground color
-          const textColor = theme?.textColor?.replace("#", "") || "252525";
-
-          // Use theme background if provided, otherwise use design system background (white)
-          const backgroundColor =
-            theme?.backgroundColor?.replace("#", "") || "FFFFFF";
+          const textColor = theme?.textColor?.replace("#", "") || "363636";
 
           // Generate slides one by one
           for (let i = 0; i < slidesData.slides.length; i++) {
             const slide = slidesData.slides[i];
             const slideIndex = i;
 
-            // Send progress update (with error handling)
-            try {
-              controller.enqueue(
-                encoder.encode(
-                  createStreamMessage({
-                    type: "progress",
-                    current: slideIndex + 1,
-                    total: totalSlides,
-                    message: `Generating slide ${slideIndex + 1}/${totalSlides}...`,
-                  })
-                )
-              );
-            } catch (enqueueError) {
-              // If controller is closed, break out of loop
-              console.error(
-                "Stream controller closed, stopping generation:",
-                enqueueError
-              );
-              break;
-            }
+            // Send progress update
+            controller.enqueue(
+              encoder.encode(
+                createStreamMessage({
+                  type: "progress",
+                  current: slideIndex + 1,
+                  total: totalSlides,
+                  message: `Generating slide ${slideIndex + 1}/${totalSlides}...`,
+                })
+              )
+            );
 
             const pptxSlide = pres.addSlide();
-
-            // Set slide background to white to ensure text visibility
-            // PptxGenJS background format - use fill property
-            pptxSlide.background = { fill: backgroundColor };
-
             const layoutSpec = layouts?.[slide.layout];
 
             switch (slide.layout) {
@@ -320,7 +280,7 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                   h: titleLayout?.h ?? 1.5,
                   fontSize: titleLayout?.fontSize ?? theme?.titleFontSize ?? 44,
                   bold: titleLayout?.bold ?? true,
-                  color: primaryColor || "252525",
+                  color: primaryColor,
                   fontFace: headingFont,
                   align:
                     (titleLayout?.align as
@@ -328,7 +288,6 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                       | "center"
                       | "right"
                       | undefined) ?? "center",
-                  valign: "middle",
                 });
                 break;
 
@@ -363,12 +322,10 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                     y: (contentLayout?.y ?? 0.5) + index * spacing,
                     w: contentLayout?.w ?? 9,
                     h: contentLayout?.h ?? 0.7,
-                    fontSize:
-                      contentLayout?.fontSize ?? theme?.bodyFontSize ?? 18,
+                    fontSize: contentLayout?.fontSize ?? theme?.bodyFontSize ?? 18,
                     bullet: contentLayout?.bullet ?? true,
-                    color: textColor || "252525",
+                    color: textColor,
                     fontFace: bodyFont,
-                    valign: "top",
                   });
                 });
                 break;
@@ -425,12 +382,10 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                   y: tcTitleLayout?.y ?? 0.3,
                   w: tcTitleLayout?.w ?? 9,
                   h: tcTitleLayout?.h ?? 0.8,
-                  fontSize:
-                    tcTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
+                  fontSize: tcTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
                   bold: tcTitleLayout?.bold ?? true,
-                  color: primaryColor || "252525",
+                  color: primaryColor,
                   fontFace: headingFont,
-                  valign: "top",
                 });
 
                 slide.content.forEach((item, index) => {
@@ -440,13 +395,11 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                     y: (tcContentLayout?.y ?? 1.3) + index * spacing,
                     w: tcContentLayout?.w ?? 8.6,
                     h: tcContentLayout?.h ?? 0.6,
-                    fontSize:
-                      tcContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
+                    fontSize: tcContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
                     bullet: tcContentLayout?.bullet ?? true,
-                    color: textColor || "252525",
+                    color: textColor,
                     fontFace: bodyFont,
                     lineSpacing: theme?.lineSpacing ?? 28,
-                    valign: "top",
                   });
                 });
                 break;
@@ -502,12 +455,10 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                   y: itTitleLayout?.y ?? 0.3,
                   w: itTitleLayout?.w ?? 9,
                   h: itTitleLayout?.h ?? 0.8,
-                  fontSize:
-                    itTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
+                  fontSize: itTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
                   bold: itTitleLayout?.bold ?? true,
-                  color: primaryColor || "252525",
+                  color: primaryColor,
                   fontFace: headingFont,
-                  valign: "top",
                 });
 
                 slide.content.forEach((item, index) => {
@@ -517,12 +468,10 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
                     y: (itContentLayout?.y ?? 1.3) + index * spacing,
                     w: itContentLayout?.w ?? 4.5,
                     h: itContentLayout?.h ?? 0.6,
-                    fontSize:
-                      itContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
+                    fontSize: itContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
                     bullet: itContentLayout?.bullet ?? true,
-                    color: textColor || "252525",
+                    color: textColor,
                     fontFace: bodyFont,
-                    valign: "top",
                   });
                 });
                 break;
@@ -532,42 +481,29 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
               pptxSlide.addNotes(slide.notes);
             }
 
-            // Stream the slide data (with error handling)
-            try {
-              controller.enqueue(
-                encoder.encode(
-                  createStreamMessage({
-                    type: "slide",
-                    slideIndex,
-                    slide,
-                  })
-                )
-              );
-            } catch (enqueueError) {
-              console.error("Failed to stream slide data:", enqueueError);
-              // Continue with next slide even if streaming fails
-            }
-          }
-
-          // Generate the final PPT file
-          try {
+            // Stream the slide data
             controller.enqueue(
               encoder.encode(
                 createStreamMessage({
-                  type: "progress",
-                  current: totalSlides,
-                  total: totalSlides,
-                  message: "Finalizing PPT...",
+                  type: "slide",
+                  slideIndex,
+                  slide,
                 })
               )
             );
-          } catch (enqueueError) {
-            console.error(
-              "Failed to send finalization progress:",
-              enqueueError
-            );
-            // Continue with PPT generation even if streaming fails
           }
+
+          // Generate the final PPT file
+          controller.enqueue(
+            encoder.encode(
+              createStreamMessage({
+                type: "progress",
+                current: totalSlides,
+                total: totalSlides,
+                message: "Finalizing PPT...",
+              })
+            )
+          );
 
           const base64Buffer = (await pres.write({
             outputType: "base64",
@@ -587,94 +523,29 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
           });
 
           // Send completion message
-          try {
-            controller.enqueue(
-              encoder.encode(
-                createStreamMessage({
-                  type: "complete",
-                  presentationId: presentation.id,
-                })
-              )
-            );
-          } catch (enqueueError: unknown) {
-            // Controller might be closed by client, which is fine
-            if (
-              enqueueError instanceof TypeError &&
-              (enqueueError.message.includes("Invalid state") ||
-                enqueueError.message.includes("already closed") ||
-                enqueueError.message.includes("Controller"))
-            ) {
-              // Client disconnected, ignore silently
-              return;
-            }
-            // Only log if it's not a controller closed error
-            console.warn("Could not send completion message:", enqueueError);
-          }
+          controller.enqueue(
+            encoder.encode(
+              createStreamMessage({
+                type: "complete",
+                presentationId: presentation.id,
+              })
+            )
+          );
 
-          // Close the controller
-          try {
-            controller.close();
-          } catch (closeError: unknown) {
-            // Controller already closed, which is fine if client disconnected
-            if (
-              closeError instanceof TypeError &&
-              (closeError.message.includes("Invalid state") ||
-                closeError.message.includes("already closed") ||
-                closeError.message.includes("Controller"))
-            ) {
-              // Silently ignore - client disconnected
-              return;
-            }
-            // Only log if it's not a controller closed error
-            console.warn("Error closing controller:", closeError);
-          }
+          controller.close();
         } catch (error) {
           console.error("Error in stream:", error);
           const errorMessage =
             error instanceof Error ? error.message : "Unknown error";
-
-          // Try to send error message
-          try {
-            controller.enqueue(
-              encoder.encode(
-                createStreamMessage({
-                  type: "error",
-                  error: errorMessage,
-                })
-              )
-            );
-          } catch (enqueueError: unknown) {
-            // Controller might be closed by client, which is fine
-            if (
-              enqueueError instanceof TypeError &&
-              (enqueueError.message.includes("Invalid state") ||
-                enqueueError.message.includes("already closed") ||
-                enqueueError.message.includes("Controller"))
-            ) {
-              // Silently ignore - client disconnected
-              return;
-            }
-            // Only log if it's not a controller closed error
-            console.warn("Could not send error message:", enqueueError);
-          }
-
-          // Close the controller
-          try {
-            controller.close();
-          } catch (closeError: unknown) {
-            // Controller already closed, which is fine if client disconnected
-            if (
-              closeError instanceof TypeError &&
-              (closeError.message.includes("Invalid state") ||
-                closeError.message.includes("already closed") ||
-                closeError.message.includes("Controller"))
-            ) {
-              // Silently ignore - client disconnected
-              return;
-            }
-            // Only log if it's not a controller closed error
-            console.warn("Error closing controller:", closeError);
-          }
+          controller.enqueue(
+            encoder.encode(
+              createStreamMessage({
+                type: "error",
+                error: errorMessage,
+              })
+            )
+          );
+          controller.close();
         }
       },
     });
@@ -704,3 +575,4 @@ The presentation has ${totalSlides} slides. Create a cohesive visual theme with 
     );
   }
 }
+

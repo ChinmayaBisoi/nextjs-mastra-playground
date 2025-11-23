@@ -15,6 +15,17 @@ const outlineSchema = z.object({
   slides: z.array(slideSchema),
 });
 
+// Editor format schema (more permissive)
+const editorSlideSchema = z.object({
+  id: z.string(),
+  background: z.string(),
+  elements: z.array(z.any()),
+});
+
+const editorOutlineSchema = z.object({
+  slides: z.array(editorSlideSchema),
+});
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -36,8 +47,13 @@ export async function POST(
       );
     }
 
-    // Validate slides structure
-    const validatedOutline = outlineSchema.parse({ slides });
+    // Try to validate with editor format first, fallback to old format
+    let validatedOutline;
+    try {
+      validatedOutline = editorOutlineSchema.parse({ slides });
+    } catch {
+      validatedOutline = outlineSchema.parse({ slides });
+    }
 
     // Fetch presentation and verify ownership
     const presentation = await prisma.presentation.findUnique({
@@ -82,11 +98,9 @@ export async function POST(
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Internal Server Error",
+        error: error instanceof Error ? error.message : "Internal Server Error",
       },
       { status: 500 }
     );
   }
 }
-
