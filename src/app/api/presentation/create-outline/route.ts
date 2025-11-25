@@ -7,7 +7,7 @@ import { toAISdkFormat } from "@mastra/ai-sdk";
 import { createUIMessageStreamResponse } from "ai";
 import { Prisma } from "@prisma/client";
 
-const pptAgent = mastra.getAgent("pptAgent");
+const pptOutlineAgent = mastra.getAgent("pptOutlineAgent");
 
 const slideSchema = z.object({
   title: z.string(),
@@ -74,7 +74,7 @@ Return the presentation outline as structured JSON with the slides array in this
 }`;
 
     // Generate structured output first (for database)
-    const generateResponse = await pptAgent.generate(
+    const generateResponse = await pptOutlineAgent.generate(
       [
         {
           role: "user",
@@ -116,7 +116,7 @@ Return the presentation outline as structured JSON with the slides array in this
     }
 
     // Stream a formatted version of the outline for display
-    const stream = await pptAgent.stream([
+    const stream = await pptOutlineAgent.stream([
       {
         role: "user",
         content: prompt,
