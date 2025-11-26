@@ -5,12 +5,12 @@ import { LibSQLStore } from "@mastra/libsql";
 import { weatherWorkflow } from "./workflows/weather-workflow";
 import { weatherAgent } from "./agents/weather-agent";
 import { pptWorkflow } from "./workflows/ppt-workflow";
-import { pptAgent } from "./agents/ppt-agent";
+import { pptOutlineAgent } from "./agents/ppt-outline-agent";
 import { layoutThemeAgent } from "./agents/layout-theme-agent";
 
 export const mastra = new Mastra({
   workflows: { weatherWorkflow, pptWorkflow },
-  agents: { weatherAgent, pptAgent, layoutThemeAgent },
+  agents: { weatherAgent, pptOutlineAgent, layoutThemeAgent },
   storage: new LibSQLStore({
     // id: "mastra-storage",
     // stores observability, scores, ... into memory storage, if it needs to persist, change to file:../mastra.db

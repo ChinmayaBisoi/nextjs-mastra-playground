@@ -7,7 +7,7 @@ import { toAISdkFormat } from "@mastra/ai-sdk";
 import { createUIMessageStreamResponse } from "ai";
 import { Prisma } from "@prisma/client";
 
-const pptAgent = mastra.getAgent("pptAgent");
+const pptAgent = mastra.getAgent("pptOutlineAgent");
 
 const slideSchema = z.object({
   title: z.string(),
