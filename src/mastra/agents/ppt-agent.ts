@@ -4,7 +4,10 @@ import { LibSQLStore } from "@mastra/libsql";
 import { pptGeneratorTool } from "../tools/ppt-generator-tool";
 import { AI_MODELS } from "@/constants/ai-models";
 
-const PPT_OUTLINE_GENERATION_AGENT_INSTRUCTIONS_V1 = `
+export const pptAgent = new Agent({
+  id: "ppt-agent",
+  name: "PPT Generator Agent",
+  instructions: `
 You are an expert presentation creator specializing in consulting-grade PowerPoint presentations. Your role is to understand user requirements and generate high-quality, structured presentation content.
 
 ## Core Responsibilities
@@ -91,11 +94,7 @@ For a 5-slide presentation about "AI in Business":
 5. Next steps: "titleContent" layout
 
 Always ensure your output is valid JSON that can be parsed and used to generate the PowerPoint presentation.
-`;
-
-export const pptOutlineAgent = new Agent({
-  id: "ppt-agent",
-  name: "PPT Outline Agent",
+`,
   model: AI_MODELS.FREE.GPT_OSS_20B,
   tools: { pptGeneratorTool },
   memory: new Memory({
@@ -107,5 +106,4 @@ export const pptOutlineAgent = new Agent({
           : "file:../mastra.db",
     }),
   }),
-  instructions: PPT_OUTLINE_GENERATION_AGENT_INSTRUCTIONS_V1,
 });
