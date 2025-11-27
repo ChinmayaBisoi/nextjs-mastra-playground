@@ -30,7 +30,7 @@ function AuthButtons() {
           </Link>
         </Button>
       ) : (
-        <SignInButton mode="modal">
+        <SignInButton mode="modal" forceRedirectUrl={"/create"}>
           <Button variant="outline" size="sm">
             <span>Sign In</span>
           </Button>

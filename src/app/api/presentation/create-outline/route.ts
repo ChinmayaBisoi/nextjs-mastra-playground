@@ -20,6 +20,38 @@ const outlineSchema = z.object({
   slides: z.array(slideSchema),
 });
 
+function getOutlinePrompt(
+  description: string,
+  slideCount: number,
+  webSearchEnabled: boolean
+) {
+  const prompt = `Create a ${slideCount}-slide presentation about: "${description}"
+
+Requirements:
+- Generate exactly ${slideCount} slides
+- First slide should use "title" layout with the presentation title
+- All other slides should use "titleContent" layout
+- Each slide should have a compelling title (5-8 words)
+- Each slide should have 3-7 bullet points
+- Content should be professional, clear, and engaging
+- Ensure logical flow and narrative progression
+${webSearchEnabled ? "- Use web search to gather current information about the topic" : ""}
+
+Return the presentation outline as structured JSON with the slides array in this exact format:
+{
+  "slides": [
+    {
+      "title": "Slide Title Here",
+      "content": ["First bullet point", "Second bullet point"],
+      "layout": "titleContent",
+      "notes": "Optional speaker notes"
+    }
+  ]
+}`;
+
+  return prompt;
+}
+
 export async function POST(req: Request) {
   try {
     const { userId } = await auth();
@@ -49,29 +81,7 @@ export async function POST(req: Request) {
     });
 
     // Create prompt for the agent
-    const prompt = `Create a ${slideCount}-slide presentation about: "${description}"
-
-Requirements:
-- Generate exactly ${slideCount} slides
-- First slide should use "title" layout with the presentation title
-- All other slides should use "titleContent" layout
-- Each slide should have a compelling title (5-8 words)
-- Each slide should have 3-7 bullet points
-- Content should be professional, clear, and engaging
-- Ensure logical flow and narrative progression
-${webSearchEnabled ? "- Use web search to gather current information about the topic" : ""}
-
-Return the presentation outline as structured JSON with the slides array in this exact format:
-{
-  "slides": [
-    {
-      "title": "Slide Title Here",
-      "content": ["First bullet point", "Second bullet point"],
-      "layout": "titleContent",
-      "notes": "Optional speaker notes"
-    }
-  ]
-}`;
+    const prompt = getOutlinePrompt(description, slideCount, webSearchEnabled);
 
     // Generate structured output first (for database)
     const generateResponse = await pptAgent.generate(
@@ -89,7 +99,7 @@ Return the presentation outline as structured JSON with the slides array in this
     );
 
     let structuredData: z.infer<typeof outlineSchema> | null = null;
-
+    ``;
     if (generateResponse.object) {
       structuredData = generateResponse.object;
     } else if (generateResponse.text) {

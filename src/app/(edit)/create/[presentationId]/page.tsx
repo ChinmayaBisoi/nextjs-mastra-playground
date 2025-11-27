@@ -1187,7 +1187,7 @@ export default function GoogleSlidesEditor() {
             {/* Left Section - Navigation & Title */}
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <button
-                onClick={() => router.push("/")}
+                onClick={() => router.push("/create")}
                 className="p-1.5 hover:bg-accent rounded transition-colors shrink-0"
                 title="Back to Dashboard"
               >
