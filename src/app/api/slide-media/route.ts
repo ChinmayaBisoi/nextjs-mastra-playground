@@ -40,18 +40,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Read file
-    const fileBuffer = await fs.readFile(mediaPath);
-
     // Determine content type
     const ext = path.extname(fileName).toLowerCase();
     let contentType = "application/octet-stream";
 
     if (ext === ".png") contentType = "image/png";
     else if (ext === ".jpg" || ext === ".jpeg") contentType = "image/jpeg";
-    else if (ext === ".svg") contentType = "image/svg+xml";
+    else if (ext === ".svg") contentType = "image/svg+xml; charset=utf-8";
     else if (ext === ".gif") contentType = "image/gif";
     else if (ext === ".webp") contentType = "image/webp";
+
+    // For SVG files, read as text to ensure proper encoding
+    if (ext === ".svg") {
+      const svgContent = await fs.readFile(mediaPath, "utf-8");
+      return new NextResponse(svgContent, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    }
+
+    // For binary files, read as buffer
+    const fileBuffer = await fs.readFile(mediaPath);
 
     return new NextResponse(fileBuffer, {
       headers: {

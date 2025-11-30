@@ -7,6 +7,10 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const slideNumber = searchParams.get("slide") || "1";
+    const folder = searchParams.get("folder") || "cream";
+
+    // Sanitize folder name to prevent directory traversal
+    const folderName = path.basename(folder);
 
     // Path to slide JSON file
     const slidePath = path.join(
@@ -14,7 +18,7 @@ export async function GET(request: NextRequest) {
       "src",
       "data",
       "output",
-      "cream",
+      folderName,
       "slides-json",
       `slide${slideNumber}.json`
     );
@@ -42,4 +46,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

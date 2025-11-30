@@ -13,6 +13,7 @@ interface CanvasRendererProps {
   mediaBasePath: string;
   slideWidth?: number; // in EMUs
   slideHeight?: number; // in EMUs
+  folder?: string; // folder name for media (default: "cream")
   onElementMove?: (elementId: number, newX: number, newY: number) => void;
 }
 
@@ -35,6 +36,7 @@ export function CanvasRenderer({
   mediaBasePath,
   slideWidth = STANDARD_SLIDE_WIDTH_EMU,
   slideHeight = STANDARD_SLIDE_HEIGHT_EMU,
+  folder = "cream",
   onElementMove,
 }: CanvasRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -151,8 +153,8 @@ export function CanvasRenderer({
 
       if (element.type === "image") {
         const imageElement = element as ImageElement;
-        // Draw image
-        const imageFile = imageElement.media.image || imageElement.media.svg;
+        // Draw image - prefer SVG if available, otherwise use regular image
+        const imageFile = imageElement.media.svg || imageElement.media.image;
         if (imageFile) {
           const img = imagesRef.current.get(imageFile);
           if (img) {
@@ -394,30 +396,39 @@ export function CanvasRenderer({
     }
   }, [draggedElementId]);
 
-  // Load all images
+  // Load all images (including SVG)
   useEffect(() => {
     const imageMap = new Map<string, HTMLImageElement>();
     const imagePromises: Promise<void>[] = [];
 
     localSlideData.elements.forEach((element) => {
       if (element.type === "image") {
-        const imageFile = element.media.image || element.media.svg;
+        const imageElement = element as ImageElement;
+        // Prefer SVG if available, otherwise use regular image
+        const imageFile = imageElement.media.svg || imageElement.media.image;
         if (imageFile && !imageMap.has(imageFile)) {
+          const isSvg = imageFile.toLowerCase().endsWith(".svg");
           const img = new Image();
           img.crossOrigin = "anonymous";
 
           const promise = new Promise<void>((resolve) => {
+            const imageUrl = `${mediaBasePath}?folder=${encodeURIComponent(folder)}&file=${encodeURIComponent(imageFile)}`;
+
             img.onload = () => {
               imageMap.set(imageFile, img);
               resolve();
             };
             img.onerror = () => {
-              console.warn(`Failed to load image: ${imageFile}`);
+              console.warn(
+                `Failed to load ${isSvg ? "SVG" : "image"}: ${imageFile}`
+              );
               resolve(); // Continue even if image fails
             };
+
+            // Set src - browsers can handle SVG images directly
+            img.src = imageUrl;
           });
 
-          img.src = `${mediaBasePath}?folder=cream&file=${encodeURIComponent(imageFile)}`;
           imagePromises.push(promise);
         }
       }
@@ -427,7 +438,7 @@ export function CanvasRenderer({
       imagesRef.current = imageMap;
       renderCanvas();
     });
-  }, [localSlideData, mediaBasePath, renderCanvas]);
+  }, [localSlideData, mediaBasePath, renderCanvas, folder]);
 
   useEffect(() => {
     if (imagesRef.current.size > 0) {
