@@ -92,9 +92,6 @@ export async function POST(req: Request) {
         description,
         slideCount: parseInt(slideCount),
         webSearchEnabled: webSearchEnabled || false,
-        templateData: templateData
-          ? (templateData as Prisma.InputJsonValue)
-          : undefined,
         status: "DRAFT",
       },
     });
@@ -123,7 +120,6 @@ export async function POST(req: Request) {
     );
 
     let structuredData: z.infer<typeof outlineSchema> | null = null;
-    ``;
     if (generateResponse.object) {
       structuredData = generateResponse.object;
     } else if (generateResponse.text) {
