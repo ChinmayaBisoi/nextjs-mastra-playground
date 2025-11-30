@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback, useState } from "react";
 import type {
   SlideJson,
   ImageElement,
   TextElement,
+  SlideElement,
 } from "@/data/slide-converter";
 
 interface CanvasRendererProps {
@@ -12,6 +13,7 @@ interface CanvasRendererProps {
   mediaBasePath: string;
   slideWidth?: number; // in EMUs
   slideHeight?: number; // in EMUs
+  onElementMove?: (elementId: number, newX: number, newY: number) => void;
 }
 
 // Standard PowerPoint slide size: 18288000 x 10287000 EMUs (16:9)
@@ -23,18 +25,67 @@ function emuToPixels(emu: number): number {
   return (emu / 914400) * 96;
 }
 
+// Convert pixels to EMU
+function pixelsToEmu(pixels: number): number {
+  return (pixels / 96) * 914400;
+}
+
 export function CanvasRenderer({
   slideData,
   mediaBasePath,
   slideWidth = STANDARD_SLIDE_WIDTH_EMU,
   slideHeight = STANDARD_SLIDE_HEIGHT_EMU,
+  onElementMove,
 }: CanvasRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [hoveredElementId, setHoveredElementId] = useState<number | null>(null);
+  const [draggedElementId, setDraggedElementId] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(
+    null
+  );
+  const [localSlideData, setLocalSlideData] = useState<SlideJson>(slideData);
+
+  // Update local data when prop changes
+  useEffect(() => {
+    setLocalSlideData(slideData);
+  }, [slideData]);
 
   // Calculate canvas dimensions
   const canvasWidth = emuToPixels(slideWidth);
   const canvasHeight = emuToPixels(slideHeight);
+
+  // Get element bounds in pixels
+  const getElementBounds = useCallback((element: SlideElement) => {
+    const x = emuToPixels(element.position.x);
+    const y = emuToPixels(element.position.y);
+    const width = emuToPixels(element.size.width);
+    const height = emuToPixels(element.size.height);
+    return { x, y, width, height };
+  }, []);
+
+  // Hit detection: find element at mouse position
+  const getElementAtPoint = useCallback(
+    (mouseX: number, mouseY: number): number | null => {
+      // Check elements in reverse order (top to bottom)
+      for (let i = localSlideData.elements.length - 1; i >= 0; i--) {
+        const element = localSlideData.elements[i];
+        const bounds = getElementBounds(element);
+
+        // Simple rectangle hit test
+        if (
+          mouseX >= bounds.x &&
+          mouseX <= bounds.x + bounds.width &&
+          mouseY >= bounds.y &&
+          mouseY <= bounds.y + bounds.height
+        ) {
+          return element.id;
+        }
+      }
+      return null;
+    },
+    [localSlideData.elements, getElementBounds]
+  );
 
   const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -47,24 +98,25 @@ export function CanvasRenderer({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw background
-    if (slideData.background.type === "solid" && slideData.background.color) {
-      ctx.fillStyle = slideData.background.color;
+    if (
+      localSlideData.background.type === "solid" &&
+      localSlideData.background.color
+    ) {
+      ctx.fillStyle = localSlideData.background.color;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     // Draw elements
-    slideData.elements.forEach((element) => {
+    localSlideData.elements.forEach((element) => {
       ctx.save();
 
       // Convert position and size from EMU to pixels
-      // PowerPoint coordinates can be negative or extend beyond slide bounds
       const x = emuToPixels(element.position.x);
       const y = emuToPixels(element.position.y);
       const width = emuToPixels(element.size.width);
       const height = emuToPixels(element.size.height);
 
       // Clamp positions to canvas bounds (elements can extend beyond)
-      // But allow drawing if any part is visible
       const rightEdge = x + width;
       const bottomEdge = y + height;
 
@@ -208,16 +260,146 @@ export function CanvasRenderer({
         }
       }
 
+      // Draw highlight border for hovered/selected element
+      const isHovered = hoveredElementId === element.id;
+      const isDragged = draggedElementId === element.id;
+      if (isHovered || isDragged) {
+        ctx.restore();
+        ctx.save();
+
+        // Draw highlight border
+        ctx.strokeStyle = isDragged ? "#3b82f6" : "#60a5fa";
+        ctx.lineWidth = 2;
+        ctx.setLineDash(isDragged ? [] : [5, 5]);
+        ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+
+        // Draw corner handles when dragged
+        if (isDragged) {
+          const handleSize = 8;
+          ctx.fillStyle = "#3b82f6";
+          ctx.fillRect(
+            x - handleSize / 2,
+            y - handleSize / 2,
+            handleSize,
+            handleSize
+          );
+          ctx.fillRect(
+            x + width - handleSize / 2,
+            y - handleSize / 2,
+            handleSize,
+            handleSize
+          );
+          ctx.fillRect(
+            x - handleSize / 2,
+            y + height - handleSize / 2,
+            handleSize,
+            handleSize
+          );
+          ctx.fillRect(
+            x + width - handleSize / 2,
+            y + height - handleSize / 2,
+            handleSize,
+            handleSize
+          );
+        }
+      }
+
       ctx.restore();
     });
-  }, [slideData]);
+  }, [localSlideData, hoveredElementId, draggedElementId]);
+
+  // Mouse event handlers
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+
+      if (draggedElementId !== null && dragOffset) {
+        // Dragging: update element position
+        const newX = mouseX - dragOffset.x;
+        const newY = mouseY - dragOffset.y;
+
+        setLocalSlideData((prev) => ({
+          ...prev,
+          elements: prev.elements.map((el) =>
+            el.id === draggedElementId
+              ? {
+                  ...el,
+                  position: {
+                    x: pixelsToEmu(newX),
+                    y: pixelsToEmu(newY),
+                  },
+                }
+              : el
+          ),
+        }));
+
+        // Notify parent
+        if (onElementMove) {
+          onElementMove(draggedElementId, pixelsToEmu(newX), pixelsToEmu(newY));
+        }
+      } else {
+        // Hovering: find element under cursor
+        const elementId = getElementAtPoint(mouseX, mouseY);
+        setHoveredElementId(elementId);
+      }
+    },
+    [draggedElementId, dragOffset, getElementAtPoint, onElementMove]
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+
+      const elementId = getElementAtPoint(mouseX, mouseY);
+      if (elementId !== null) {
+        const element = localSlideData.elements.find(
+          (el) => el.id === elementId
+        );
+        if (element) {
+          const bounds = getElementBounds(element);
+          setDraggedElementId(elementId);
+          setDragOffset({
+            x: mouseX - bounds.x,
+            y: mouseY - bounds.y,
+          });
+          setHoveredElementId(null); // Clear hover when dragging
+        }
+      }
+    },
+    [getElementAtPoint, getElementBounds, localSlideData.elements]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setDraggedElementId(null);
+    setDragOffset(null);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (draggedElementId === null) {
+      setHoveredElementId(null);
+    }
+  }, [draggedElementId]);
 
   // Load all images
   useEffect(() => {
     const imageMap = new Map<string, HTMLImageElement>();
     const imagePromises: Promise<void>[] = [];
 
-    slideData.elements.forEach((element) => {
+    localSlideData.elements.forEach((element) => {
       if (element.type === "image") {
         const imageFile = element.media.image || element.media.svg;
         if (imageFile && !imageMap.has(imageFile)) {
@@ -245,7 +427,7 @@ export function CanvasRenderer({
       imagesRef.current = imageMap;
       renderCanvas();
     });
-  }, [slideData, mediaBasePath, renderCanvas]);
+  }, [localSlideData, mediaBasePath, renderCanvas]);
 
   useEffect(() => {
     if (imagesRef.current.size > 0) {
@@ -258,11 +440,19 @@ export function CanvasRenderer({
       ref={canvasRef}
       width={canvasWidth}
       height={canvasHeight}
+      onMouseMove={handleMouseMove}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
       style={{
         maxWidth: "100%",
         height: "auto",
         border: "1px solid #ddd",
         borderRadius: "4px",
+        cursor:
+          hoveredElementId !== null || draggedElementId !== null
+            ? "move"
+            : "default",
       }}
     />
   );
