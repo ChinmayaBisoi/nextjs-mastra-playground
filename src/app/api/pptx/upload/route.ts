@@ -5,8 +5,16 @@ import path from "path";
 import { convertSlideToJson } from "@/data/slide-converter";
 import type { SlideJson } from "@/data/slide-converter";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes for large file processing
+
 export async function POST(req: Request) {
   try {
+    // Log request details for debugging
+    const contentType = req.headers.get("content-type");
+    console.log("Upload request received, content-type:", contentType);
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
 

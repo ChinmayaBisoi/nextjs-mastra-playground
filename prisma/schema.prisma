@@ -33,7 +33,6 @@ model Presentation {
   slideCount       Int
   webSearchEnabled Boolean            @default(false)
   outline          Json?
-  templateData     Json? // stores { templateSpec: TemplateSpec, themeOverrides: ThemeOverrides }
   status           PresentationStatus @default(DRAFT)
   pptFileUrl       String?
   createdAt        DateTime           @default(now())
@@ -41,6 +40,13 @@ model Presentation {
   slides           Slide[]
 
   @@index([userId])
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  json      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Slide {
