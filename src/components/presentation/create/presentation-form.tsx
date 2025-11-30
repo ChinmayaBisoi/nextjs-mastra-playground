@@ -396,7 +396,7 @@ export function PresentationForm() {
       {/* Template Upload Section */}
       <div className="space-y-6">
         <div>
-          <h2 className="text-lg font-semibold">Template (Optional)</h2>
+          <h2 className="text-lg font-semibold">Choose a template </h2>
           <p className="text-sm text-muted-foreground mt-1">
             Upload a .pptx template to use its layouts and theme
           </p>
