@@ -48,3 +48,6 @@ next-env.d.ts
 
 # mastra
 /.mastra/
+
+# output
+/src/data/output/

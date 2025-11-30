@@ -29,12 +29,9 @@ export async function GET() {
     console.error("Error fetching presentations:", error);
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Internal Server Error",
+        error: error instanceof Error ? error.message : "Internal Server Error",
       },
       { status: 500 }
     );
   }
 }
-
-

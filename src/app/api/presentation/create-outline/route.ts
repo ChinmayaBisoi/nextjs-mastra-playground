@@ -6,8 +6,9 @@ import { z } from "zod";
 import { toAISdkFormat } from "@mastra/ai-sdk";
 import { createUIMessageStreamResponse } from "ai";
 import { Prisma } from "@prisma/client";
+import { TemplateData } from "@/types/parse";
 
-const pptAgent = mastra.getAgent("pptAgent");
+const pptAgent = mastra.getAgent("pptOutlineAgent");
 
 const slideSchema = z.object({
   title: z.string(),
@@ -20,36 +21,26 @@ const outlineSchema = z.object({
   slides: z.array(slideSchema),
 });
 
-export async function POST(req: Request) {
-  try {
-    const { userId } = await auth();
+function getOutlinePrompt(
+  description: string,
+  slideCount: number,
+  webSearchEnabled: boolean,
+  templateData?: TemplateData
+) {
+  // Build available layouts info if template is provided
+  let layoutInfo = "";
+  if (templateData?.templateSpec?.layouts) {
+    const layoutNames = templateData.templateSpec.layouts
+      .map((l) => l.layoutName)
+      .filter((name) => name && name !== "Unnamed Layout")
+      .slice(0, 10); // Limit to 10 layouts for prompt brevity
 
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (layoutNames.length > 0) {
+      layoutInfo = `\n- The presentation will use a custom template with these available layouts: ${layoutNames.join(", ")}`;
     }
+  }
 
-    const { description, slideCount, webSearchEnabled } = await req.json();
-
-    if (!description || !slideCount) {
-      return NextResponse.json(
-        { error: "Description and slideCount are required" },
-        { status: 400 }
-      );
-    }
-
-    // Create Presentation record
-    const presentation = await prisma.presentation.create({
-      data: {
-        userId,
-        description,
-        slideCount: parseInt(slideCount),
-        webSearchEnabled: webSearchEnabled || false,
-        status: "DRAFT",
-      },
-    });
-
-    // Create prompt for the agent
-    const prompt = `Create a ${slideCount}-slide presentation about: "${description}"
+  const prompt = `Create a ${slideCount}-slide presentation about: "${description}"
 
 Requirements:
 - Generate exactly ${slideCount} slides
@@ -58,7 +49,7 @@ Requirements:
 - Each slide should have a compelling title (5-8 words)
 - Each slide should have 3-7 bullet points
 - Content should be professional, clear, and engaging
-- Ensure logical flow and narrative progression
+- Ensure logical flow and narrative progression${layoutInfo}
 ${webSearchEnabled ? "- Use web search to gather current information about the topic" : ""}
 
 Return the presentation outline as structured JSON with the slides array in this exact format:
@@ -72,6 +63,46 @@ Return the presentation outline as structured JSON with the slides array in this
     }
   ]
 }`;
+
+  return prompt;
+}
+
+export async function POST(req: Request) {
+  try {
+    const { userId } = await auth();
+
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { description, slideCount, webSearchEnabled, templateData } =
+      await req.json();
+
+    if (!description || !slideCount) {
+      return NextResponse.json(
+        { error: "Description and slideCount are required" },
+        { status: 400 }
+      );
+    }
+
+    // Create Presentation record with optional template data
+    const presentation = await prisma.presentation.create({
+      data: {
+        userId,
+        description,
+        slideCount: parseInt(slideCount),
+        webSearchEnabled: webSearchEnabled || false,
+        status: "DRAFT",
+      },
+    });
+
+    // Create prompt for the agent (pass template data for context)
+    const prompt = getOutlinePrompt(
+      description,
+      slideCount,
+      webSearchEnabled,
+      templateData as TemplateData | undefined
+    );
 
     // Generate structured output first (for database)
     const generateResponse = await pptAgent.generate(
@@ -89,7 +120,6 @@ Return the presentation outline as structured JSON with the slides array in this
     );
 
     let structuredData: z.infer<typeof outlineSchema> | null = null;
-
     if (generateResponse.object) {
       structuredData = generateResponse.object;
     } else if (generateResponse.text) {

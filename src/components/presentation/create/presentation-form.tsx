@@ -6,15 +6,13 @@ import { WebSearchToggle } from "@/components/presentation/create/web-search-tog
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-
-type PresentationFormInput = {
-  description: string;
-  slideCount: number;
-  webSearchEnabled: boolean;
-};
+import { TemplateData, TemplateSpec, ThemeOverrides } from "@/types/parse";
+import { Upload, X, FileText, Palette } from "lucide-react";
 
 type Slide = {
   title: string;
@@ -29,6 +27,9 @@ type Outline = {
 
 export function PresentationForm() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Form state
   const [slideCount, setSlideCount] = useState(8);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -37,6 +38,93 @@ export function PresentationForm() {
   const [outline, setOutline] = useState<Outline | null>(null);
   const [outlineJson, setOutlineJson] = useState("");
   const [isGeneratingPPT, setIsGeneratingPPT] = useState(false);
+
+  // Template state
+  const [templateSpec, setTemplateSpec] = useState<TemplateSpec | null>(null);
+  const [isParsingTemplate, setIsParsingTemplate] = useState(false);
+  const [templateFileName, setTemplateFileName] = useState<string | null>(null);
+
+  // Theme overrides state
+  const [themeOverrides, setThemeOverrides] = useState<ThemeOverrides>({});
+  const [showThemeCustomization, setShowThemeCustomization] = useState(false);
+
+  const handleTemplateUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith(".pptx")) {
+      toast.error("Please upload a .pptx file");
+      return;
+    }
+
+    setIsParsingTemplate(true);
+    setTemplateFileName(file.name);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/parse", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to parse template");
+      }
+
+      const spec: TemplateSpec = await response.json();
+      setTemplateSpec(spec);
+
+      // Initialize theme overrides from template theme
+      if (spec.theme) {
+        setThemeOverrides({
+          primaryColor: spec.theme.primaryColor,
+          accentColors: spec.theme.accentColors,
+          fontFamilies: spec.theme.fontFamilies,
+        });
+      }
+
+      toast.success(`Template loaded: ${spec.layouts.length} layouts found`);
+    } catch (error) {
+      console.error("Error parsing template:", error);
+      toast.error("Failed to parse template file");
+      setTemplateFileName(null);
+      setTemplateSpec(null);
+    } finally {
+      setIsParsingTemplate(false);
+    }
+  };
+
+  const handleRemoveTemplate = () => {
+    setTemplateSpec(null);
+    setTemplateFileName(null);
+    setThemeOverrides({});
+    setShowThemeCustomization(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleThemeColorChange = (key: keyof ThemeOverrides, value: string) => {
+    setThemeOverrides((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const handleAccentColorChange = (index: number, value: string) => {
+    setThemeOverrides((prev) => {
+      const newAccents = [...(prev.accentColors || [])];
+      newAccents[index] = value;
+      return {
+        ...prev,
+        accentColors: newAccents,
+      };
+    });
+  };
 
   const handleDescriptionSubmit = async (value: string) => {
     if (!value.trim()) {
@@ -50,6 +138,17 @@ export function PresentationForm() {
     setOutlineJson("");
 
     try {
+      // Build template data if template is uploaded
+      const templateData: TemplateData | undefined = templateSpec
+        ? {
+            templateSpec,
+            themeOverrides:
+              Object.keys(themeOverrides).length > 0
+                ? themeOverrides
+                : undefined,
+          }
+        : undefined;
+
       const response = await fetch("/api/presentation/create-outline", {
         method: "POST",
         headers: {
@@ -59,6 +158,7 @@ export function PresentationForm() {
           description: value,
           slideCount,
           webSearchEnabled,
+          templateData,
         }),
       });
 
@@ -92,7 +192,6 @@ export function PresentationForm() {
         setStreamedText(accumulatedText);
 
         // Try to extract presentation ID and outline from the stream
-        // The outline should be in JSON format
         try {
           const jsonMatch = accumulatedText.match(/\{[\s\S]*"slides"[\s\S]*\}/);
           if (jsonMatch) {
@@ -102,12 +201,12 @@ export function PresentationForm() {
               setOutlineJson(JSON.stringify(parsed, null, 2));
             }
           }
-        } catch (e) {
+        } catch {
           // Continue streaming even if JSON parsing fails
         }
       }
 
-      // After stream completes, fetch the presentation from database to get the saved outline
+      // After stream completes, fetch the presentation from database
       if (presId) {
         try {
           const presResponse = await fetch(`/api/presentation/${presId}`);
@@ -147,8 +246,8 @@ export function PresentationForm() {
               setOutlineJson(JSON.stringify(parsed, null, 2));
             }
           }
-        } catch (e) {
-          console.error("Failed to parse outline:", e);
+        } catch {
+          console.error("Failed to parse outline");
         }
       }
 
@@ -170,7 +269,7 @@ export function PresentationForm() {
       if (parsed.slides && Array.isArray(parsed.slides)) {
         setOutline(parsed);
       }
-    } catch (e) {
+    } catch {
       // Invalid JSON, but allow editing
     }
   };
@@ -190,7 +289,7 @@ export function PresentationForm() {
       if (outlineJson) {
         try {
           outlineToUse = JSON.parse(outlineJson);
-        } catch (e) {
+        } catch {
           toast.error("Invalid outline JSON");
           setIsGeneratingPPT(false);
           return;
@@ -205,6 +304,8 @@ export function PresentationForm() {
         body: JSON.stringify({
           presentationId,
           outline: outlineToUse,
+          themeOverrides:
+            Object.keys(themeOverrides).length > 0 ? themeOverrides : undefined,
         }),
       });
 
@@ -287,6 +388,229 @@ export function PresentationForm() {
             checked={webSearchEnabled}
             onCheckedChange={setWebSearchEnabled}
           />
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Template Upload Section */}
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Template (Optional)</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Upload a .pptx template to use its layouts and theme
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {/* Upload Button / Template Display */}
+          {!templateSpec ? (
+            <div className="flex items-center gap-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pptx"
+                onChange={handleTemplateUpload}
+                className="hidden"
+                id="template-upload"
+              />
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isParsingTemplate}
+                className="w-full md:w-auto"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                {isParsingTemplate ? "Parsing..." : "Upload Template"}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-4 border rounded-lg bg-muted/50">
+              <div className="flex items-center gap-3">
+                <FileText className="w-8 h-8 text-primary" />
+                <div>
+                  <p className="font-medium">{templateFileName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {templateSpec.layouts.length} layouts available
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setShowThemeCustomization(!showThemeCustomization)
+                  }
+                >
+                  <Palette className="w-4 h-4 mr-1" />
+                  Theme
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleRemoveTemplate}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Layout Preview */}
+          {templateSpec && (
+            <div className="space-y-2">
+              <Label className="text-sm text-muted-foreground">
+                Available Layouts:
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {templateSpec.layouts.slice(0, 8).map((layout) => (
+                  <span
+                    key={layout.layoutId}
+                    className="px-2 py-1 text-xs rounded-md bg-secondary text-secondary-foreground"
+                  >
+                    {layout.layoutName || "Unnamed"}
+                  </span>
+                ))}
+                {templateSpec.layouts.length > 8 && (
+                  <span className="px-2 py-1 text-xs rounded-md bg-secondary text-secondary-foreground">
+                    +{templateSpec.layouts.length - 8} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Theme Customization */}
+          {templateSpec && showThemeCustomization && (
+            <div className="space-y-4 p-4 border rounded-lg">
+              <h3 className="font-medium flex items-center gap-2">
+                <Palette className="w-4 h-4" />
+                Theme Customization
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Customize colors while keeping the template layouts
+              </p>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Primary Color */}
+                <div className="space-y-2">
+                  <Label htmlFor="primaryColor">Primary Color</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="primaryColor"
+                      type="color"
+                      value={
+                        themeOverrides.primaryColor ||
+                        templateSpec.theme?.primaryColor ||
+                        "#252525"
+                      }
+                      onChange={(e) =>
+                        handleThemeColorChange("primaryColor", e.target.value)
+                      }
+                      className="w-12 h-10 p-1 cursor-pointer"
+                    />
+                    <Input
+                      type="text"
+                      value={
+                        themeOverrides.primaryColor ||
+                        templateSpec.theme?.primaryColor ||
+                        "#252525"
+                      }
+                      onChange={(e) =>
+                        handleThemeColorChange("primaryColor", e.target.value)
+                      }
+                      className="flex-1 font-mono text-sm"
+                      placeholder="#252525"
+                    />
+                  </div>
+                </div>
+
+                {/* Accent Colors */}
+                {(
+                  themeOverrides.accentColors ||
+                  templateSpec.theme?.accentColors ||
+                  []
+                )
+                  .slice(0, 3)
+                  .map((color, index) => (
+                    <div key={index} className="space-y-2">
+                      <Label htmlFor={`accentColor-${index}`}>
+                        Accent Color {index + 1}
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id={`accentColor-${index}`}
+                          type="color"
+                          value={color || "#4472C4"}
+                          onChange={(e) =>
+                            handleAccentColorChange(index, e.target.value)
+                          }
+                          className="w-12 h-10 p-1 cursor-pointer"
+                        />
+                        <Input
+                          type="text"
+                          value={color || "#4472C4"}
+                          onChange={(e) =>
+                            handleAccentColorChange(index, e.target.value)
+                          }
+                          className="flex-1 font-mono text-sm"
+                          placeholder="#4472C4"
+                        />
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              {/* Font Families */}
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="majorFont">Heading Font</Label>
+                  <Input
+                    id="majorFont"
+                    type="text"
+                    value={
+                      themeOverrides.fontFamilies?.major ||
+                      templateSpec.theme?.fontFamilies?.major ||
+                      "Calibri"
+                    }
+                    onChange={(e) =>
+                      setThemeOverrides((prev) => ({
+                        ...prev,
+                        fontFamilies: {
+                          ...prev.fontFamilies,
+                          major: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Calibri"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="minorFont">Body Font</Label>
+                  <Input
+                    id="minorFont"
+                    type="text"
+                    value={
+                      themeOverrides.fontFamilies?.minor ||
+                      templateSpec.theme?.fontFamilies?.minor ||
+                      "Calibri"
+                    }
+                    onChange={(e) =>
+                      setThemeOverrides((prev) => ({
+                        ...prev,
+                        fontFamilies: {
+                          ...prev.fontFamilies,
+                          minor: e.target.value,
+                        },
+                      }))
+                    }
+                    placeholder="Calibri"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
