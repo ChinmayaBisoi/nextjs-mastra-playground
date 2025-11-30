@@ -33,6 +33,7 @@ model Presentation {
   slideCount       Int
   webSearchEnabled Boolean            @default(false)
   outline          Json?
+  templateData     Json? // stores { templateSpec: TemplateSpec, themeOverrides: ThemeOverrides }
   status           PresentationStatus @default(DRAFT)
   pptFileUrl       String?
   createdAt        DateTime           @default(now())

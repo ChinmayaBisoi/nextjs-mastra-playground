@@ -23,6 +23,12 @@ import {
 import PptxGenJS from "pptxgenjs";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { TemplateData } from "@/types/parse";
+import { assignLayoutsToSlides } from "@/mastra/tools/layout-assignment-engine";
+import {
+  renderSlideWithLayout,
+  resolveTheme,
+} from "@/mastra/tools/layout-renderer";
 
 type TextElement = {
   id: string;
@@ -95,6 +101,7 @@ type Presentation = {
     slides: OutlineSlide[];
   } | null;
   status: string;
+  templateData?: TemplateData | null;
 };
 
 type StreamMessage =
@@ -833,99 +840,133 @@ export default function GoogleSlidesEditor() {
         pres.title = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
       }
 
-      // Canvas dimensions in pixels (1280x720 for 16:9)
-      const canvasWidthPx = 1280;
-      const canvasHeightPx = 720;
+      // Check if we have template data to use for export
+      const templateData = presentation?.templateData;
+      const templateSpec = templateData?.templateSpec;
+      const themeOverrides = templateData?.themeOverrides;
 
-      // PPTX uses inches, and standard slide is 10" x 7.5" for 16:9
-      const slideWidthInches = 10;
-      const slideHeightInches = 7.5;
+      // If we have template data and outline, use template-based export
+      if (
+        templateSpec &&
+        templateSpec.layouts.length > 0 &&
+        presentation?.outline
+      ) {
+        const resolvedTheme = resolveTheme(templateSpec, themeOverrides);
+        const outlineSlides = presentation.outline.slides;
 
-      // Conversion factors
-      const pxToInchesX = slideWidthInches / canvasWidthPx;
-      const pxToInchesY = slideHeightInches / canvasHeightPx;
-
-      // Process each slide
-      for (const slide of slides) {
-        const pptxSlide = pres.addSlide();
-
-        // Set slide background color
-        if (slide.background && slide.background !== "#ffffff") {
-          const bgColor = slide.background.replace("#", "");
-          pptxSlide.background = { fill: bgColor };
-        }
-
-        // Sort elements by zIndex to maintain layering
-        const sortedElements = [...slide.elements].sort(
-          (a, b) => a.zIndex - b.zIndex
+        // Assign layouts to slides (max 2 repetitions)
+        const layoutAssignments = assignLayoutsToSlides(
+          outlineSlides,
+          templateSpec,
+          2
         );
 
-        // Add each element to the slide
-        for (const element of sortedElements) {
-          if (element.type === "text") {
-            const textElement = element as TextElement;
+        // Render each slide using assigned layout
+        for (const [index, outlineSlide] of outlineSlides.entries()) {
+          const pptxSlide = pres.addSlide();
+          const assignedLayoutId = layoutAssignments[index];
+          const layout = templateSpec.layouts.find(
+            (l) => l.layoutId === assignedLayoutId
+          );
 
-            // Convert pixel positions to inches
-            const x = textElement.x * pxToInchesX;
-            const y = textElement.y * pxToInchesY;
-            const w = textElement.width * pxToInchesX;
-            const h = textElement.height * pxToInchesY;
+          renderSlideWithLayout(pptxSlide, outlineSlide, layout, resolvedTheme);
+        }
+      } else {
+        // Fallback: use editor canvas-based export (existing logic)
+        // Canvas dimensions in pixels (1280x720 for 16:9)
+        const canvasWidthPx = 1280;
+        const canvasHeightPx = 720;
 
-            // Convert font size from px to points (1px ≈ 0.75pt)
-            const fontSizePt = textElement.fontSize * 0.75;
+        // PPTX uses inches, and standard slide is 10" x 7.5" for 16:9
+        const slideWidthInches = 10;
+        const slideHeightInches = 7.5;
 
-            // Convert hex color to RGB (remove # if present)
-            const color = textElement.color.replace("#", "");
+        // Conversion factors
+        const pxToInchesX = slideWidthInches / canvasWidthPx;
+        const pxToInchesY = slideHeightInches / canvasHeightPx;
 
-            pptxSlide.addText(textElement.content, {
-              x,
-              y,
-              w,
-              h,
-              fontSize: fontSizePt,
-              color,
-              bold:
-                textElement.fontWeight === "bold" ||
-                textElement.fontWeight === "700",
-              align:
-                textElement.align === "left"
-                  ? "left"
-                  : textElement.align === "center"
-                    ? "center"
-                    : "right",
-            });
-          } else if (element.type === "shape") {
-            const shapeElement = element as ShapeElement;
+        // Process each slide
+        for (const slide of slides) {
+          const pptxSlide = pres.addSlide();
 
-            // Convert pixel positions to inches
-            const x = shapeElement.x * pxToInchesX;
-            const y = shapeElement.y * pxToInchesY;
-            const w = shapeElement.width * pxToInchesX;
-            const h = shapeElement.height * pxToInchesY;
+          // Set slide background color
+          if (slide.background && slide.background !== "#ffffff") {
+            const bgColor = slide.background.replace("#", "");
+            pptxSlide.background = { fill: bgColor };
+          }
 
-            // Convert colors
-            const fillColor = shapeElement.color.replace("#", "");
-            const lineColor = shapeElement.borderColor.replace("#", "");
-            const lineWidth = shapeElement.borderWidth * pxToInchesX;
+          // Sort elements by zIndex to maintain layering
+          const sortedElements = [...slide.elements].sort(
+            (a, b) => a.zIndex - b.zIndex
+          );
 
-            if (shapeElement.shapeType === "rectangle") {
-              pptxSlide.addShape(pres.ShapeType.rect, {
+          // Add each element to the slide
+          for (const element of sortedElements) {
+            if (element.type === "text") {
+              const textElement = element as TextElement;
+
+              // Convert pixel positions to inches
+              const x = textElement.x * pxToInchesX;
+              const y = textElement.y * pxToInchesY;
+              const w = textElement.width * pxToInchesX;
+              const h = textElement.height * pxToInchesY;
+
+              // Convert font size from px to points (1px ≈ 0.75pt)
+              const fontSizePt = textElement.fontSize * 0.75;
+
+              // Convert hex color to RGB (remove # if present)
+              const color = textElement.color.replace("#", "");
+
+              pptxSlide.addText(textElement.content, {
                 x,
                 y,
                 w,
                 h,
-                fill: { color: fillColor },
-                line: { color: lineColor, width: lineWidth },
+                fontSize: fontSizePt,
+                color,
+                bold:
+                  textElement.fontWeight === "bold" ||
+                  textElement.fontWeight === "700",
+                align:
+                  textElement.align === "left"
+                    ? "left"
+                    : textElement.align === "center"
+                      ? "center"
+                      : "right",
               });
-            } else if (shapeElement.shapeType === "circle") {
-              pptxSlide.addShape(pres.ShapeType.ellipse, {
-                x,
-                y,
-                w,
-                h,
-                fill: { color: fillColor },
-                line: { color: lineColor, width: lineWidth },
-              });
+            } else if (element.type === "shape") {
+              const shapeElement = element as ShapeElement;
+
+              // Convert pixel positions to inches
+              const x = shapeElement.x * pxToInchesX;
+              const y = shapeElement.y * pxToInchesY;
+              const w = shapeElement.width * pxToInchesX;
+              const h = shapeElement.height * pxToInchesY;
+
+              // Convert colors
+              const fillColor = shapeElement.color.replace("#", "");
+              const lineColor = shapeElement.borderColor.replace("#", "");
+              const lineWidth = shapeElement.borderWidth * pxToInchesX;
+
+              if (shapeElement.shapeType === "rectangle") {
+                pptxSlide.addShape(pres.ShapeType.rect, {
+                  x,
+                  y,
+                  w,
+                  h,
+                  fill: { color: fillColor },
+                  line: { color: lineColor, width: lineWidth },
+                });
+              } else if (shapeElement.shapeType === "circle") {
+                pptxSlide.addShape(pres.ShapeType.ellipse, {
+                  x,
+                  y,
+                  w,
+                  h,
+                  fill: { color: fillColor },
+                  line: { color: lineColor, width: lineWidth },
+                });
+              }
             }
           }
         }

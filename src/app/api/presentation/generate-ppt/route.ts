@@ -4,7 +4,12 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import PptxGenJS from "pptxgenjs";
-import { mastra } from "@/mastra";
+import { TemplateData, TemplateSpec, ThemeOverrides } from "@/types/parse";
+import { assignLayoutsToSlides } from "@/mastra/tools/layout-assignment-engine";
+import {
+  renderSlideWithLayout,
+  resolveTheme,
+} from "@/mastra/tools/layout-renderer";
 
 const slideSchema = z.object({
   title: z.string(),
@@ -25,7 +30,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { presentationId, outline } = await req.json();
+    const { presentationId, outline, themeOverrides } = await req.json();
 
     if (!presentationId) {
       return NextResponse.json(
@@ -87,342 +92,61 @@ export async function POST(req: Request) {
     const title =
       slidesData.slides[0]?.title || presentation.description || "Presentation";
 
-    // Generate layout theme using the layout theme agent
-    const layoutThemeAgent = mastra?.getAgent("layoutThemeAgent");
-    let layoutTheme: {
-      theme: {
-        primaryColor: string;
-        secondaryColor?: string;
-        accentColor?: string;
-        backgroundColor?: string;
-        textColor?: string;
-        headingFont: string;
-        bodyFont: string;
-        headingFontSize: number;
-        bodyFontSize: number;
-        titleFontSize: number;
-        lineSpacing?: number;
-        slideMargin?: number;
-      };
-      layouts: {
-        title: Record<string, unknown>;
-        content: Record<string, unknown>;
-        titleContent: Record<string, unknown>;
-        imageText: Record<string, unknown>;
-      };
-    } | null = null;
+    // Extract template data from presentation (stored during outline creation)
+    const storedTemplateData = presentation.templateData as TemplateData | null;
+    const templateSpec: TemplateSpec | undefined =
+      storedTemplateData?.templateSpec;
 
-    if (layoutThemeAgent) {
-      try {
-        const themePrompt = `Design a professional layout and theme for this presentation about: "${title}"
+    // Merge theme overrides: request overrides > stored overrides > template theme
+    const finalThemeOverrides: ThemeOverrides | undefined =
+      themeOverrides || storedTemplateData?.themeOverrides;
 
-The presentation has ${slidesData.slides.length} slides. Create a cohesive visual theme with appropriate colors, fonts, and spacing, and design optimal layouts for each slide type.`;
-
-        const themeResponse = await layoutThemeAgent.generate(
-          [{ role: "user", content: themePrompt }],
-          {
-            structuredOutput: {
-              schema: z.object({
-                theme: z.object({
-                  primaryColor: z.string(),
-                  secondaryColor: z.string().optional(),
-                  accentColor: z.string().optional(),
-                  backgroundColor: z.string().optional(),
-                  textColor: z.string().optional(),
-                  headingFont: z.string(),
-                  bodyFont: z.string(),
-                  headingFontSize: z.number(),
-                  bodyFontSize: z.number(),
-                  titleFontSize: z.number(),
-                  lineSpacing: z.number().optional(),
-                  slideMargin: z.number().optional(),
-                }),
-                layouts: z.object({
-                  title: z.record(z.string(), z.unknown()),
-                  content: z.record(z.string(), z.unknown()),
-                  titleContent: z.record(z.string(), z.unknown()),
-                  imageText: z.record(z.string(), z.unknown()),
-                }),
-              }),
-            },
-          }
-        );
-
-        if (themeResponse.object) {
-          layoutTheme = themeResponse.object;
-        }
-      } catch (error) {
-        console.error("Failed to generate layout theme:", error);
-        // Continue with default theme
-      }
+    // If we have theme overrides, update them in the database
+    if (themeOverrides && storedTemplateData) {
+      await prisma.presentation.update({
+        where: { id: presentationId },
+        data: {
+          templateData: {
+            ...storedTemplateData,
+            themeOverrides,
+          } as Prisma.InputJsonValue,
+        },
+      });
     }
 
-    // Generate PPT file using the same logic as the tool
+    // Generate PPT file
     const pres = new PptxGenJS();
     if (title) {
       pres.title = title;
     }
 
-    // Use layout theme if available
-    const theme = layoutTheme?.theme;
-    const layouts = layoutTheme?.layouts;
+    // Resolve theme from template and overrides
+    const resolvedTheme = resolveTheme(templateSpec, finalThemeOverrides);
 
-    // Ensure colors are in correct format (PptxGenJS expects hex without #)
-    // Use theme colors from API if provided, otherwise use design system defaults
-    // Design system: foreground (text) = oklch(0.145 0 0) ≈ #252525, background = white = #FFFFFF
-    const primaryColor = theme?.primaryColor?.replace("#", "") || "252525";
-    const headingFont = theme?.headingFont || "Calibri";
-    const bodyFont = theme?.bodyFont || "Calibri";
-    // Use theme text color if provided, otherwise use design system foreground color
-    const textColor = theme?.textColor?.replace("#", "") || "252525";
+    // If template is provided, use layout assignment algorithm
+    if (templateSpec && templateSpec.layouts.length > 0) {
+      // Assign layouts to slides with max 2 repetitions
+      const layoutAssignments = assignLayoutsToSlides(
+        slidesData.slides,
+        templateSpec,
+        2 // maxRepetitions
+      );
 
-    // Use theme background if provided, otherwise use design system background (white)
-    const backgroundColor =
-      theme?.backgroundColor?.replace("#", "") || "FFFFFF";
+      // Render each slide using assigned layout
+      for (const [index, slide] of slidesData.slides.entries()) {
+        const pptxSlide = pres.addSlide();
+        const assignedLayoutId = layoutAssignments[index];
+        const layout = templateSpec.layouts.find(
+          (l) => l.layoutId === assignedLayoutId
+        );
 
-    for (const slide of slidesData.slides) {
-      const pptxSlide = pres.addSlide();
-
-      // Set slide background to white to ensure text visibility
-      // PptxGenJS background format - use fill property
-      pptxSlide.background = { fill: backgroundColor };
-
-      const layoutSpec = layouts?.[slide.layout];
-
-      switch (slide.layout) {
-        case "title":
-          const titleLayout =
-            (layoutSpec?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                  align?: string;
-                }
-              | undefined) ||
-            (layouts?.title?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                  align?: string;
-                }
-              | undefined);
-          pptxSlide.addText(slide.title, {
-            x: titleLayout?.x ?? 0.5,
-            y: titleLayout?.y ?? 2,
-            w: titleLayout?.w ?? 9,
-            h: titleLayout?.h ?? 1.5,
-            fontSize: titleLayout?.fontSize ?? theme?.titleFontSize ?? 44,
-            bold: titleLayout?.bold ?? true,
-            color: primaryColor || "252525",
-            fontFace: headingFont,
-            align:
-              (titleLayout?.align as "left" | "center" | "right" | undefined) ??
-              "center",
-            valign: "middle",
-          });
-          break;
-
-        case "content":
-          const contentLayout =
-            (layoutSpec?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined) ||
-            (layouts?.content?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined);
-          slide.content.forEach((item, index) => {
-            const spacing = contentLayout?.spacing ?? 0.8;
-            pptxSlide.addText(item, {
-              x: contentLayout?.x ?? 0.5,
-              y: (contentLayout?.y ?? 0.5) + index * spacing,
-              w: contentLayout?.w ?? 9,
-              h: contentLayout?.h ?? 0.7,
-              fontSize: contentLayout?.fontSize ?? theme?.bodyFontSize ?? 18,
-              bullet: contentLayout?.bullet ?? true,
-              color: textColor || "252525",
-              fontFace: bodyFont,
-              valign: "top",
-            });
-          });
-          break;
-
-        case "titleContent":
-        default:
-          const tcTitleLayout =
-            (layoutSpec?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                }
-              | undefined) ||
-            (layouts?.titleContent?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                }
-              | undefined);
-          const tcContentLayout =
-            (layoutSpec?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined) ||
-            (layouts?.titleContent?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined);
-
-          pptxSlide.addText(slide.title, {
-            x: tcTitleLayout?.x ?? 0.5,
-            y: tcTitleLayout?.y ?? 0.3,
-            w: tcTitleLayout?.w ?? 9,
-            h: tcTitleLayout?.h ?? 0.8,
-            fontSize: tcTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
-            bold: tcTitleLayout?.bold ?? true,
-            color: primaryColor || "252525",
-            fontFace: headingFont,
-            valign: "top",
-          });
-
-          slide.content.forEach((item, index) => {
-            const spacing = tcContentLayout?.spacing ?? 0.7;
-            pptxSlide.addText(item, {
-              x: tcContentLayout?.x ?? 0.7,
-              y: (tcContentLayout?.y ?? 1.3) + index * spacing,
-              w: tcContentLayout?.w ?? 8.6,
-              h: tcContentLayout?.h ?? 0.6,
-              fontSize: tcContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
-              bullet: tcContentLayout?.bullet ?? true,
-              color: textColor || "252525",
-              fontFace: bodyFont,
-              lineSpacing: theme?.lineSpacing ?? 28,
-              valign: "top",
-            });
-          });
-          break;
-
-        case "imageText":
-          const itTitleLayout =
-            (layoutSpec?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                }
-              | undefined) ||
-            (layouts?.imageText?.title as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bold?: boolean;
-                }
-              | undefined);
-          const itContentLayout =
-            (layoutSpec?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined) ||
-            (layouts?.imageText?.content as
-              | {
-                  x?: number;
-                  y?: number;
-                  w?: number;
-                  h?: number;
-                  fontSize?: number;
-                  bullet?: boolean;
-                  spacing?: number;
-                }
-              | undefined);
-
-          pptxSlide.addText(slide.title, {
-            x: itTitleLayout?.x ?? 0.5,
-            y: itTitleLayout?.y ?? 0.3,
-            w: itTitleLayout?.w ?? 9,
-            h: itTitleLayout?.h ?? 0.8,
-            fontSize: itTitleLayout?.fontSize ?? theme?.headingFontSize ?? 32,
-            bold: itTitleLayout?.bold ?? true,
-            color: primaryColor || "252525",
-            fontFace: headingFont,
-            valign: "top",
-          });
-
-          slide.content.forEach((item, index) => {
-            const spacing = itContentLayout?.spacing ?? 0.7;
-            pptxSlide.addText(item, {
-              x: itContentLayout?.x ?? 0.7,
-              y: (itContentLayout?.y ?? 1.3) + index * spacing,
-              w: itContentLayout?.w ?? 4.5,
-              h: itContentLayout?.h ?? 0.6,
-              fontSize: itContentLayout?.fontSize ?? theme?.bodyFontSize ?? 16,
-              bullet: itContentLayout?.bullet ?? true,
-              color: textColor || "252525",
-              fontFace: bodyFont,
-              valign: "top",
-            });
-          });
-          break;
+        renderSlideWithLayout(pptxSlide, slide, layout, resolvedTheme);
       }
-
-      if (slide.notes) {
-        pptxSlide.addNotes(slide.notes);
+    } else {
+      // No template - use default rendering
+      for (const slide of slidesData.slides) {
+        const pptxSlide = pres.addSlide();
+        renderSlideWithLayout(pptxSlide, slide, undefined, resolvedTheme);
       }
     }
 
@@ -443,7 +167,7 @@ The presentation has ${slidesData.slides.length} slides. Create a cohesive visua
       where: { id: presentationId },
       data: {
         status: "PPT_GENERATED",
-        pptFileUrl: result.filename, // Store filename, could store full URL if uploading to storage
+        pptFileUrl: result.filename,
       },
     });
 

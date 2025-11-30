@@ -6,6 +6,7 @@ import { z } from "zod";
 import { toAISdkFormat } from "@mastra/ai-sdk";
 import { createUIMessageStreamResponse } from "ai";
 import { Prisma } from "@prisma/client";
+import { TemplateData } from "@/types/parse";
 
 const pptAgent = mastra.getAgent("pptOutlineAgent");
 
@@ -23,8 +24,22 @@ const outlineSchema = z.object({
 function getOutlinePrompt(
   description: string,
   slideCount: number,
-  webSearchEnabled: boolean
+  webSearchEnabled: boolean,
+  templateData?: TemplateData
 ) {
+  // Build available layouts info if template is provided
+  let layoutInfo = "";
+  if (templateData?.templateSpec?.layouts) {
+    const layoutNames = templateData.templateSpec.layouts
+      .map((l) => l.layoutName)
+      .filter((name) => name && name !== "Unnamed Layout")
+      .slice(0, 10); // Limit to 10 layouts for prompt brevity
+
+    if (layoutNames.length > 0) {
+      layoutInfo = `\n- The presentation will use a custom template with these available layouts: ${layoutNames.join(", ")}`;
+    }
+  }
+
   const prompt = `Create a ${slideCount}-slide presentation about: "${description}"
 
 Requirements:
@@ -34,7 +49,7 @@ Requirements:
 - Each slide should have a compelling title (5-8 words)
 - Each slide should have 3-7 bullet points
 - Content should be professional, clear, and engaging
-- Ensure logical flow and narrative progression
+- Ensure logical flow and narrative progression${layoutInfo}
 ${webSearchEnabled ? "- Use web search to gather current information about the topic" : ""}
 
 Return the presentation outline as structured JSON with the slides array in this exact format:
@@ -60,7 +75,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { description, slideCount, webSearchEnabled } = await req.json();
+    const { description, slideCount, webSearchEnabled, templateData } =
+      await req.json();
 
     if (!description || !slideCount) {
       return NextResponse.json(
@@ -69,19 +85,27 @@ export async function POST(req: Request) {
       );
     }
 
-    // Create Presentation record
+    // Create Presentation record with optional template data
     const presentation = await prisma.presentation.create({
       data: {
         userId,
         description,
         slideCount: parseInt(slideCount),
         webSearchEnabled: webSearchEnabled || false,
+        templateData: templateData
+          ? (templateData as Prisma.InputJsonValue)
+          : undefined,
         status: "DRAFT",
       },
     });
 
-    // Create prompt for the agent
-    const prompt = getOutlinePrompt(description, slideCount, webSearchEnabled);
+    // Create prompt for the agent (pass template data for context)
+    const prompt = getOutlinePrompt(
+      description,
+      slideCount,
+      webSearchEnabled,
+      templateData as TemplateData | undefined
+    );
 
     // Generate structured output first (for database)
     const generateResponse = await pptAgent.generate(

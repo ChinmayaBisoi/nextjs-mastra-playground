@@ -40,3 +40,17 @@ export type TemplateSpec = {
     author?: string;
   };
 };
+
+export type ThemeOverrides = {
+  primaryColor?: string;
+  accentColors?: string[];
+  fontFamilies?: {
+    major?: string;
+    minor?: string;
+  };
+};
+
+export type TemplateData = {
+  templateSpec: TemplateSpec;
+  themeOverrides?: ThemeOverrides;
+};

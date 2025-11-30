@@ -125,7 +125,7 @@ async function extractLayout(
   zip: JSZip,
   parser: XMLParser,
   layoutPath: string,
-  masters: Record<string, unknown>
+  _masters: Record<string, unknown>
 ) {
   const xml = await zip.file(layoutPath)!.async("string");
   const data = parser.parse(xml);
@@ -133,7 +133,13 @@ async function extractLayout(
   const layoutRoot = data["p:sldLayout"];
   const layoutName = layoutRoot?.["p:cSld"]?.["p:name"] || "Unnamed Layout";
 
-  const shapes = layoutRoot?.["p:cSld"]?.["p:spTree"]?.["p:sp"] || []; // the placeholder shapes
+  // Handle both array and single object cases
+  const spTree = layoutRoot?.["p:cSld"]?.["p:spTree"] || {};
+  const shapes = Array.isArray(spTree["p:sp"])
+    ? spTree["p:sp"]
+    : spTree["p:sp"]
+      ? [spTree["p:sp"]]
+      : [];
 
   const placeholders = [];
 
@@ -141,30 +147,46 @@ async function extractLayout(
     const nv = shape["p:nvSpPr"];
     if (!nv) continue;
 
-    const placeholder = nv["p:nvPr"]?.["p:ph"] || nv["p:cNvPr"]?.["p:ph"]; // placeholder node
+    // Placeholder is in p:nvPr -> p:ph, not in p:cNvPr
+    const nvPr = nv["p:nvPr"];
+    const placeholder = nvPr?.["p:ph"];
 
+    // Only process if this is actually a placeholder
     if (!placeholder) continue;
 
     const phType = placeholder["type"] || ""; // title, body, ctrTitle, subTitle...
-
     const mappedType = mapPlaceholderType(phType);
 
-    const geom = shape["p:spPr"]?.["a:xfrm"] || {};
-    const pos = {
-      x: parseInt(geom["a:off"]?.["x"] || "0", 10),
-      y: parseInt(geom["a:off"]?.["y"] || "0", 10),
-      width: parseInt(geom["a:ext"]?.["cx"] || "0", 10),
-      height: parseInt(geom["a:ext"]?.["cy"] || "0", 10),
-    };
+    // Extract position data - handle both object and array structures
+    const spPr = shape["p:spPr"] || {};
+    const xfrm = spPr["a:xfrm"] || {};
 
+    // Handle a:off and a:ext - they might be objects or arrays
+    const off = Array.isArray(xfrm["a:off"]) ? xfrm["a:off"][0] : xfrm["a:off"];
+    const ext = Array.isArray(xfrm["a:ext"]) ? xfrm["a:ext"][0] : xfrm["a:ext"];
+
+    const x = off?.["x"] ? parseInt(String(off["x"]), 10) : 0;
+    const y = off?.["y"] ? parseInt(String(off["y"]), 10) : 0;
+    const width = ext?.["cx"] ? parseInt(String(ext["cx"]), 10) : 0;
+    const height = ext?.["cy"] ? parseInt(String(ext["cy"]), 10) : 0;
+
+    // Only include placeholders with valid position data
+    if (width === 0 && height === 0) continue;
+
+    const cNvPr = nv["p:cNvPr"] || {};
     const style = extractTextStyle(shape);
 
     placeholders.push({
-      id: nv["p:cNvPr"]?.["id"],
-      name: nv["p:cNvPr"]?.["name"],
+      id: cNvPr["id"] || String(placeholders.length + 1),
+      name: cNvPr["name"],
       type: mappedType,
-      index: placeholder["idx"] ? parseInt(placeholder["idx"]) : undefined,
-      ...pos,
+      index: placeholder["idx"]
+        ? parseInt(String(placeholder["idx"]), 10)
+        : undefined,
+      x,
+      y,
+      width,
+      height,
       style,
     });
   }
@@ -194,20 +216,63 @@ function mapPlaceholderType(type: string) {
 // ----------------------------
 // Extract Text Styling
 // ----------------------------
-function extractTextStyle(shape: any) {
+function extractTextStyle(shape: unknown) {
+  const shapeObj = shape as Record<string, unknown>;
+  const txBody = shapeObj?.["p:txBody"] as Record<string, unknown> | undefined;
+  if (!txBody) return {};
+
+  // Handle both array and object cases
+  const paraData = txBody["a:p"];
+  const paragraphs = Array.isArray(paraData)
+    ? paraData
+    : paraData
+      ? [paraData]
+      : [];
+
+  if (paragraphs.length === 0) return {};
+
+  // Get first paragraph's first run properties
+  const firstPara = paragraphs[0] as Record<string, unknown>;
+  const runData = firstPara["a:r"];
+  const runs = Array.isArray(runData) ? runData : runData ? [runData] : [];
+
   const defRPr =
-    shape?.["p:txBody"]?.["a:p"]?.["a:r"]?.["a:rPr"] ||
-    shape?.["p:txBody"]?.["a:p"]?.["a:rPr"];
+    (runs[0] as Record<string, unknown>)?.["a:rPr"] ||
+    firstPara["a:rPr"] ||
+    ((firstPara["a:pPr"] as Record<string, unknown>)?.["a:defRPr"] as
+      | Record<string, unknown>
+      | undefined);
 
   if (!defRPr) return {};
 
+  const defRPrObj = defRPr as Record<string, unknown>;
+
+  // Handle array/object cases for nested properties
+  const latinData = defRPrObj["latin"];
+  const latin = Array.isArray(latinData)
+    ? (latinData[0] as Record<string, unknown>)
+    : (latinData as Record<string, unknown> | undefined);
+
+  const solidFillData = defRPrObj["solidFill"];
+  const solidFill = Array.isArray(solidFillData)
+    ? (solidFillData[0] as Record<string, unknown>)
+    : (solidFillData as Record<string, unknown> | undefined);
+
+  const srgbClr = solidFill?.["a:srgbClr"] as
+    | Record<string, unknown>
+    | undefined;
+  const schemeClr = solidFill?.["a:schemeClr"] as
+    | Record<string, unknown>
+    | undefined;
+
   return {
-    fontFamily: defRPr["latin"]?.["typeface"],
-    fontSize: defRPr["sz"] ? Number(defRPr["sz"]) / 100 : undefined,
+    fontFamily: latin?.["typeface"] as string | undefined,
+    fontSize: defRPrObj["sz"] ? Number(defRPrObj["sz"]) / 100 : undefined,
     color:
-      defRPr["solidFill"]?.["srgbClr"]?.["val"] ||
-      defRPr["solidFill"]?.["schemeClr"]?.["val"],
-    bold: defRPr["b"] === "1",
-    italic: defRPr["i"] === "1",
+      srgbClr?.["val"] || schemeClr?.["val"]
+        ? `#${(srgbClr?.["val"] || schemeClr?.["val"]) as string}`
+        : undefined,
+    bold: defRPrObj["b"] === "1" || defRPrObj["b"] === 1,
+    italic: defRPrObj["i"] === "1" || defRPrObj["i"] === 1,
   };
 }
