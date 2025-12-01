@@ -43,6 +43,7 @@ export function PresentationForm() {
   const [templateSpec, setTemplateSpec] = useState<TemplateSpec | null>(null);
   const [isParsingTemplate, setIsParsingTemplate] = useState(false);
   const [templateFileName, setTemplateFileName] = useState<string | null>(null);
+  const [templateFileSize, setTemplateFileSize] = useState<number | null>(null);
 
   // Theme overrides state
   const [themeOverrides, setThemeOverrides] = useState<ThemeOverrides>({});
@@ -59,23 +60,36 @@ export function PresentationForm() {
       return;
     }
 
+    // Check file size (16MB limit)
+    const MAX_FILE_SIZE = 16 * 1024 * 1024; // 16MB
+    if (file.size > MAX_FILE_SIZE) {
+      const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      toast.error(
+        `File size exceeds the limit of 16MB. Your file is ${fileSizeMB}MB`
+      );
+      return;
+    }
+
     setIsParsingTemplate(true);
     setTemplateFileName(file.name);
+    setTemplateFileSize(file.size);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/parse", {
+      const response = await fetch("/api/template/upload", {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        throw new Error("Failed to parse template");
+        const error = await response.json();
+        throw new Error(error.error || "Failed to upload template");
       }
 
-      const spec: TemplateSpec = await response.json();
+      const result = await response.json();
+      const spec: TemplateSpec = result.templateSpec;
       setTemplateSpec(spec);
 
       // Initialize theme overrides from template theme
@@ -87,11 +101,16 @@ export function PresentationForm() {
         });
       }
 
-      toast.success(`Template loaded: ${spec.layouts.length} layouts found`);
+      toast.success(
+        `Template uploaded and saved: ${spec.layouts.length} layouts found`
+      );
     } catch (error) {
-      console.error("Error parsing template:", error);
-      toast.error("Failed to parse template file");
+      console.error("Error uploading template:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to upload template"
+      );
       setTemplateFileName(null);
+      setTemplateFileSize(null);
       setTemplateSpec(null);
     } finally {
       setIsParsingTemplate(false);
@@ -101,6 +120,7 @@ export function PresentationForm() {
   const handleRemoveTemplate = () => {
     setTemplateSpec(null);
     setTemplateFileName(null);
+    setTemplateFileSize(null);
     setThemeOverrides({});
     setShowThemeCustomization(false);
     if (fileInputRef.current) {
@@ -400,6 +420,9 @@ export function PresentationForm() {
           <p className="text-sm text-muted-foreground mt-1">
             Upload a .pptx template to use its layouts and theme
           </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Maximum file size: 16MB • Individual images: 4MB
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -432,6 +455,11 @@ export function PresentationForm() {
                   <p className="font-medium">{templateFileName}</p>
                   <p className="text-sm text-muted-foreground">
                     {templateSpec.layouts.length} layouts available
+                    {templateFileSize && (
+                      <span className="ml-2">
+                        • {(templateFileSize / (1024 * 1024)).toFixed(2)}MB
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>

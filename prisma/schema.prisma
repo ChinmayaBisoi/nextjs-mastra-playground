@@ -40,3 +40,18 @@ model Presentation {
 
   @@index([userId])
 }
+
+model Template {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  fileName     String
+  fileUrl      String?
+  templateSpec Json
+  slidesJson   Json?
+  images       Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+}
