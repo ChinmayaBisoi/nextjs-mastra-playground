@@ -5,11 +5,25 @@
 import fs from "fs/promises";
 import path from "path";
 import type { SlideJson } from "./types";
-import { parseSlideXml, parseSlideRels } from "./parser";
+import {
+  parseSlideXml,
+  parseSlideRels,
+  parseLayoutXml,
+  parseMasterSlideXml,
+  parseThemeXml,
+  parsePresentationXml,
+  getLayoutXmlPath,
+  getMasterSlideXmlPath,
+  getThemeXmlPath,
+  getPresentationXmlPath,
+} from "./parser";
 import {
   extractBackground,
   extractLayout,
   extractElements,
+  extractTheme,
+  extractMasterSlide,
+  extractPresentationMetadata,
 } from "./extractors";
 
 /**
@@ -39,16 +53,48 @@ export async function convertSlideToJson(
   // Parse relationships
   const relsMap = await parseSlideRels(relsPath);
 
+  // Parse layout XML if layout reference exists
+  let layoutData = null;
+  const layoutRel = Array.from(relsMap.values()).find((rel) =>
+    rel.type.includes("slideLayout")
+  );
+  if (layoutRel) {
+    const layoutPath = layoutRel.target;
+    const layoutName = layoutPath.split("/").pop() || "";
+    if (layoutName) {
+      const fullLayoutPath = getLayoutXmlPath(outputDir, layoutName);
+      layoutData = await parseLayoutXml(fullLayoutPath);
+    }
+  }
+
   // Extract data
   const background = extractBackground(slideData);
-  const layout = extractLayout(slideData, relsMap);
+  const layout = extractLayout(slideData, relsMap, layoutData);
   const elements = extractElements(slideData, relsMap);
+
+  // Parse presentation-level data (theme, master slide, presentation metadata)
+  // These are the same for all slides, but we parse them here for simplicity
+  // In a production system, you might want to cache these
+  const themePath = getThemeXmlPath(outputDir);
+  const themeData = await parseThemeXml(themePath);
+  const theme = extractTheme(themeData);
+
+  const masterPath = getMasterSlideXmlPath(outputDir);
+  const masterData = await parseMasterSlideXml(masterPath);
+  const masterSlide = extractMasterSlide(masterData);
+
+  const presentationPath = getPresentationXmlPath(outputDir);
+  const presentationData = await parsePresentationXml(presentationPath);
+  const presentationMetadata = extractPresentationMetadata(presentationData);
 
   return {
     slideNumber,
     background,
     elements,
     layout,
+    ...(theme && { theme }),
+    ...(masterSlide && { masterSlide }),
+    ...(presentationMetadata && { presentationMetadata }),
   };
 }
 
@@ -64,11 +110,7 @@ export async function convertSlideToJsonFile(
 
   const finalOutputPath =
     outputPath ||
-    path.join(
-      outputDir,
-      "slides-json",
-      `slide${slideNumber}.json`
-    );
+    path.join(outputDir, "slides-json", `slide${slideNumber}.json`);
 
   // Create directory if it doesn't exist
   await fs.mkdir(path.dirname(finalOutputPath), { recursive: true });
@@ -83,4 +125,3 @@ export async function convertSlideToJsonFile(
   console.log(`Converted slide ${slideNumber} to: ${finalOutputPath}`);
   return finalOutputPath;
 }
-

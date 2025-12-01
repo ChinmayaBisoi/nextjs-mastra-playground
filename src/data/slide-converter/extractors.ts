@@ -7,11 +7,17 @@ import type {
   TextElement,
   SlideBackground,
   SlideLayout,
+  LayoutPlaceholder,
   RelationshipMap,
   Position,
   Size,
   Transform,
   TextFormatting,
+  Theme,
+  ThemeColors,
+  ThemeFonts,
+  MasterSlide,
+  PresentationMetadata,
 } from "./types";
 import {
   emuToPoints,
@@ -58,7 +64,8 @@ export function extractBackground(slideData: any): SlideBackground {
  */
 export function extractLayout(
   slideData: any,
-  relsMap: RelationshipMap
+  relsMap: RelationshipMap,
+  layoutData?: any
 ): SlideLayout {
   // Try to find layout reference in relationships
   const layoutRel = Array.from(relsMap.values()).find((rel) =>
@@ -68,9 +75,60 @@ export function extractLayout(
   if (layoutRel) {
     const layoutPath = layoutRel.target;
     const layoutName = layoutPath.split("/").pop() || "unknown";
+
+    // Extract layout type from layout XML if available
+    let layoutType = "unknown";
+    const placeholders: LayoutPlaceholder[] = [];
+
+    if (layoutData?.sldLayout) {
+      layoutType = layoutData.sldLayout["@_type"] || "unknown";
+
+      // Extract placeholders from layout
+      const cSld = layoutData.sldLayout.cSld;
+      if (cSld?.spTree) {
+        const extractPlaceholders = (spTree: any) => {
+          // Check shapes
+          const shapes = spTree.sp || [];
+          const shapeArray = Array.isArray(shapes)
+            ? shapes
+            : shapes
+              ? [shapes]
+              : [];
+          for (const shape of shapeArray) {
+            const nvPr = shape.nvSpPr?.nvPr;
+            if (nvPr?.ph) {
+              placeholders.push({
+                type: nvPr.ph["@_type"] || "",
+                index: nvPr.ph["@_idx"]
+                  ? parseInt(nvPr.ph["@_idx"], 10)
+                  : undefined,
+                size: nvPr.ph["@_sz"] || undefined,
+              });
+            }
+          }
+
+          // Check groups
+          const groups = spTree.grpSp || [];
+          const groupArray = Array.isArray(groups)
+            ? groups
+            : groups
+              ? [groups]
+              : [];
+          for (const group of groupArray) {
+            if (group.spTree) {
+              extractPlaceholders(group.spTree);
+            }
+          }
+        };
+
+        extractPlaceholders(cSld.spTree);
+      }
+    }
+
     return {
-      type: "unknown", // Would need to parse layout XML to get actual type
+      type: layoutType,
       reference: layoutName,
+      placeholders: placeholders.length > 0 ? placeholders : undefined,
     };
   }
 
@@ -366,11 +424,16 @@ function extractElementsFromGroup(
   const xfrm = grpSpPr.xfrm || {};
   const off = xfrm.off || {};
   const chOff = xfrm.chOff || {};
+  const ext = xfrm.ext || {};
 
   const groupOffsetX = getNumericAttribute(off, "@_x", 0);
   const groupOffsetY = getNumericAttribute(off, "@_y", 0);
   const childOffsetX = getNumericAttribute(chOff, "@_x", 0);
   const childOffsetY = getNumericAttribute(chOff, "@_y", 0);
+
+  // Get group visual extent (used for bounds validation)
+  const groupExtentX = getNumericAttribute(ext, "@_cx", 0);
+  const groupExtentY = getNumericAttribute(ext, "@_cy", 0);
 
   // Child shapes are positioned relative to chOff, not directly to group.off
   // Formula: final_position = parent_offset + group.off + (child_shape.off - group.chOff)
@@ -378,6 +441,12 @@ function extractElementsFromGroup(
     (groupTransform?.offsetX || 0) + groupOffsetX - childOffsetX;
   const baseOffsetY =
     (groupTransform?.offsetY || 0) + groupOffsetY - childOffsetY;
+
+  // Calculate group visual bounds for validation
+  const groupVisualLeft = groupOffsetX;
+  const groupVisualRight = groupOffsetX + groupExtentX;
+  const groupVisualTop = groupOffsetY;
+  const groupVisualBottom = groupOffsetY + groupExtentY;
 
   // Process nested shapes
   const shapes = grpSp.sp || [];
@@ -390,6 +459,57 @@ function extractElementsFromGroup(
       // Apply group transform to position (child position is relative to chOff)
       textElement.position.x += baseOffsetX;
       textElement.position.y += baseOffsetY;
+
+      // Validate element is within group's visual bounds to prevent overlaps
+      // Only apply bounds checking when group has valid visual extent
+      // This prevents elements from extending beyond their group's visual boundaries
+      if (groupExtentX > 0 && groupExtentY > 0) {
+        const elementRight = textElement.position.x + textElement.size.width;
+        const elementBottom = textElement.position.y + textElement.size.height;
+
+        // Clip element to group's visual right edge if it extends beyond
+        if (
+          elementRight > groupVisualRight &&
+          textElement.position.x >= groupVisualLeft
+        ) {
+          textElement.size.width = Math.max(
+            0,
+            groupVisualRight - textElement.position.x
+          );
+        }
+
+        // Clip element to group's visual bottom edge if it extends beyond
+        if (
+          elementBottom > groupVisualBottom &&
+          textElement.position.y >= groupVisualTop
+        ) {
+          textElement.size.height = Math.max(
+            0,
+            groupVisualBottom - textElement.position.y
+          );
+        }
+
+        // If element starts before group's visual left edge, adjust it
+        if (textElement.position.x < groupVisualLeft) {
+          const adjustment = groupVisualLeft - textElement.position.x;
+          textElement.position.x = groupVisualLeft;
+          textElement.size.width = Math.max(
+            0,
+            textElement.size.width - adjustment
+          );
+        }
+
+        // If element starts before group's visual top edge, adjust it
+        if (textElement.position.y < groupVisualTop) {
+          const adjustment = groupVisualTop - textElement.position.y;
+          textElement.position.y = groupVisualTop;
+          textElement.size.height = Math.max(
+            0,
+            textElement.size.height - adjustment
+          );
+        }
+      }
+
       elements.push(textElement);
       continue;
     }
@@ -400,6 +520,58 @@ function extractElementsFromGroup(
       // Apply group transform to position (child position is relative to chOff)
       imageElement.position.x += baseOffsetX;
       imageElement.position.y += baseOffsetY;
+
+      // Validate element is within group's visual bounds to prevent overlaps
+      // Only apply bounds checking when group has valid visual extent
+      // This prevents elements from extending beyond their group's visual boundaries
+      if (groupExtentX > 0 && groupExtentY > 0) {
+        const elementRight = imageElement.position.x + imageElement.size.width;
+        const elementBottom =
+          imageElement.position.y + imageElement.size.height;
+
+        // Clip element to group's visual right edge if it extends beyond
+        if (
+          elementRight > groupVisualRight &&
+          imageElement.position.x >= groupVisualLeft
+        ) {
+          imageElement.size.width = Math.max(
+            0,
+            groupVisualRight - imageElement.position.x
+          );
+        }
+
+        // Clip element to group's visual bottom edge if it extends beyond
+        if (
+          elementBottom > groupVisualBottom &&
+          imageElement.position.y >= groupVisualTop
+        ) {
+          imageElement.size.height = Math.max(
+            0,
+            groupVisualBottom - imageElement.position.y
+          );
+        }
+
+        // If element starts before group's visual left edge, adjust it
+        if (imageElement.position.x < groupVisualLeft) {
+          const adjustment = groupVisualLeft - imageElement.position.x;
+          imageElement.position.x = groupVisualLeft;
+          imageElement.size.width = Math.max(
+            0,
+            imageElement.size.width - adjustment
+          );
+        }
+
+        // If element starts before group's visual top edge, adjust it
+        if (imageElement.position.y < groupVisualTop) {
+          const adjustment = groupVisualTop - imageElement.position.y;
+          imageElement.position.y = groupVisualTop;
+          imageElement.size.height = Math.max(
+            0,
+            imageElement.size.height - adjustment
+          );
+        }
+      }
+
       elements.push(imageElement);
       continue;
     }
@@ -476,4 +648,200 @@ export function extractElements(
   }
 
   return elements;
+}
+
+/**
+ * Extract theme colors from theme XML
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractThemeColors(themeData: any): ThemeColors {
+  const colors: ThemeColors = {};
+
+  if (!themeData?.theme?.themeElements?.clrScheme) {
+    return colors;
+  }
+
+  const clrScheme = themeData.theme.themeElements.clrScheme;
+
+  // Helper to extract color value
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extractColor = (colorObj: any): string | undefined => {
+    if (!colorObj) return undefined;
+
+    // Try srgbClr first
+    if (colorObj.srgbClr?.["@_val"]) {
+      return normalizeHexColor(colorObj.srgbClr["@_val"]);
+    }
+
+    // Try sysClr
+    if (colorObj.sysClr?.["@_lastClr"]) {
+      return normalizeHexColor(colorObj.sysClr["@_lastClr"]);
+    }
+
+    // Try schemeClr (theme color reference)
+    if (colorObj.schemeClr?.["@_val"]) {
+      // This is a theme color reference, we'll map it later
+      return colorObj.schemeClr["@_val"];
+    }
+
+    return undefined;
+  };
+
+  if (clrScheme.dk1) colors.dk1 = extractColor(clrScheme.dk1);
+  if (clrScheme.lt1) colors.lt1 = extractColor(clrScheme.lt1);
+  if (clrScheme.dk2) colors.dk2 = extractColor(clrScheme.dk2);
+  if (clrScheme.lt2) colors.lt2 = extractColor(clrScheme.lt2);
+  if (clrScheme.accent1) colors.accent1 = extractColor(clrScheme.accent1);
+  if (clrScheme.accent2) colors.accent2 = extractColor(clrScheme.accent2);
+  if (clrScheme.accent3) colors.accent3 = extractColor(clrScheme.accent3);
+  if (clrScheme.accent4) colors.accent4 = extractColor(clrScheme.accent4);
+  if (clrScheme.accent5) colors.accent5 = extractColor(clrScheme.accent5);
+  if (clrScheme.accent6) colors.accent6 = extractColor(clrScheme.accent6);
+  if (clrScheme.hlink) colors.hlink = extractColor(clrScheme.hlink);
+  if (clrScheme.folHlink) colors.folHlink = extractColor(clrScheme.folHlink);
+
+  return colors;
+}
+
+/**
+ * Extract theme fonts from theme XML
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractThemeFonts(themeData: any): ThemeFonts {
+  const fonts: ThemeFonts = {};
+
+  if (!themeData?.theme?.themeElements?.fontScheme) {
+    return fonts;
+  }
+
+  const fontScheme = themeData.theme.themeElements.fontScheme;
+
+  if (fontScheme.majorFont) {
+    fonts.majorFont = {
+      latin: fontScheme.majorFont.latin?.["@_typeface"],
+      ea: fontScheme.majorFont.ea?.["@_typeface"],
+      cs: fontScheme.majorFont.cs?.["@_typeface"],
+    };
+  }
+
+  if (fontScheme.minorFont) {
+    fonts.minorFont = {
+      latin: fontScheme.minorFont.latin?.["@_typeface"],
+      ea: fontScheme.minorFont.ea?.["@_typeface"],
+      cs: fontScheme.minorFont.cs?.["@_typeface"],
+    };
+  }
+
+  return fonts;
+}
+
+/**
+ * Extract theme from theme XML
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractTheme(themeData: any): Theme | undefined {
+  if (!themeData) return undefined;
+
+  const colors = extractThemeColors(themeData);
+  const fonts = extractThemeFonts(themeData);
+
+  // Only return if we have some data
+  if (Object.keys(colors).length === 0 && Object.keys(fonts).length === 0) {
+    return undefined;
+  }
+
+  return {
+    colors,
+    fonts,
+  };
+}
+
+/**
+ * Extract master slide data from master slide XML
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractMasterSlide(masterData: any): MasterSlide | undefined {
+  if (!masterData?.sldMaster) return undefined;
+
+  const master: MasterSlide = {};
+
+  // Extract color map
+  if (masterData.sldMaster.clrMap) {
+    const clrMap = masterData.sldMaster.clrMap;
+    master.colorMap = {};
+
+    // Map all color attributes
+    const colorAttrs = [
+      "@_bg1",
+      "@_tx1",
+      "@_bg2",
+      "@_tx2",
+      "@_accent1",
+      "@_accent2",
+      "@_accent3",
+      "@_accent4",
+      "@_accent5",
+      "@_accent6",
+      "@_hlink",
+      "@_folHlink",
+    ];
+
+    for (const attr of colorAttrs) {
+      if (clrMap[attr]) {
+        master.colorMap![attr.replace("@_", "")] = clrMap[attr];
+      }
+    }
+  }
+
+  // Extract text styles
+  if (masterData.sldMaster.txStyles) {
+    master.textStyles = {
+      title: masterData.sldMaster.txStyles.titleStyle,
+      body: masterData.sldMaster.txStyles.bodyStyle,
+      other: masterData.sldMaster.txStyles.otherStyle,
+    };
+  }
+
+  return Object.keys(master).length > 0 ? master : undefined;
+}
+
+/**
+ * Extract presentation metadata from presentation XML
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractPresentationMetadata(
+  presentationData: any
+): PresentationMetadata | undefined {
+  if (!presentationData?.presentation) return undefined;
+
+  const metadata: PresentationMetadata = {};
+
+  // Extract slide size
+  if (presentationData.presentation.sldSz) {
+    const sldSz = presentationData.presentation.sldSz;
+    metadata.slideSize = {
+      width: getNumericAttribute(sldSz, "@_cx", 0),
+      height: getNumericAttribute(sldSz, "@_cy", 0),
+    };
+  }
+
+  // Extract embedded fonts
+  if (presentationData.presentation.embeddedFontLst?.embeddedFont) {
+    const embeddedFonts =
+      presentationData.presentation.embeddedFontLst.embeddedFont;
+    const fontArray = Array.isArray(embeddedFonts)
+      ? embeddedFonts
+      : [embeddedFonts];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metadata.embeddedFonts = fontArray
+      .map((font: any) => ({
+        typeface: font.font?.["@_typeface"] || "",
+        charset: font.font?.["@_charset"],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }))
+      .filter((f: any) => f.typeface);
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
 }

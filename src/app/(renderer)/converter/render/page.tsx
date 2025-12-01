@@ -6,6 +6,7 @@ import type { SlideJson } from "@/data/slide-converter";
 import { Loader2, Upload, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parsePptxFile } from "@/utils/pptx-browser-parser";
 
 export default function SlideRenderPage() {
   const [slides, setSlides] = useState<SlideJson[]>([]);
@@ -32,34 +33,28 @@ export default function SlideRenderPage() {
       setError(null);
       setLoading(true);
 
-      const formData = new FormData();
-      formData.append("file", file);
+      // Parse PPTX file directly in the browser
+      const slides = await parsePptxFile(file);
 
-      const response = await fetch("/api/pptx/upload", {
-        method: "POST",
-        body: formData,
-      });
+      // Generate a folder name from the file name
+      const fileName = file.name.replace(/\.pptx$/i, "");
+      const sanitizedFolderName = fileName
+        .replace(/[^a-zA-Z0-9-_]/g, "_")
+        .toLowerCase();
+      const timestamp = Date.now();
+      const folderName = `${sanitizedFolderName}_${timestamp}`;
 
-      if (!response.ok) {
-        let errorMessage = "Failed to upload file";
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch {
-          // Response wasn't JSON, use status text
-          errorMessage = `${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      setSlides(data.slides);
-      setFolderName(data.folderName);
+      setSlides(slides);
+      setFolderName(folderName);
       setCurrentSlideIndex(0);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload file");
-      console.error("Error uploading file:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to parse PPTX file. Please ensure the file is valid."
+      );
+      console.error("Error parsing file:", err);
     } finally {
       setUploading(false);
       setLoading(false);

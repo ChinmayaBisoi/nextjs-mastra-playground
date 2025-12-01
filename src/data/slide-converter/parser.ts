@@ -37,10 +37,12 @@ export async function parseSlideRels(
     const xmlData = await fs.readFile(relsPath, "utf-8");
     const parsed = parser.parse(xmlData);
     const relationships = parsed.Relationships?.Relationship || [];
-    const relsArray = Array.isArray(relationships) ? relationships : [relationships];
-    
+    const relsArray = Array.isArray(relationships)
+      ? relationships
+      : [relationships];
+
     const map: RelationshipMap = new Map();
-    
+
     for (const rel of relsArray) {
       if (rel["@_Id"] && rel["@_Target"]) {
         map.set(rel["@_Id"], {
@@ -50,7 +52,7 @@ export async function parseSlideRels(
         });
       }
     }
-    
+
     return map;
   } catch (error) {
     console.error(`Error parsing relationships XML: ${relsPath}`, error);
@@ -68,7 +70,10 @@ export function getSlideBaseDir(outputDir: string): string {
 /**
  * Get slide XML path
  */
-export function getSlideXmlPath(outputDir: string, slideNumber: number): string {
+export function getSlideXmlPath(
+  outputDir: string,
+  slideNumber: number
+): string {
   const baseDir = getSlideBaseDir(outputDir);
   return path.join(baseDir, "slides", `slide${slideNumber}.xml`);
 }
@@ -87,13 +92,104 @@ export function getSlideRelsPath(
 /**
  * Resolve media file path from relationship target
  */
-export function resolveMediaPath(
-  target: string,
-  outputDir: string
-): string {
+export function resolveMediaPath(target: string, outputDir: string): string {
   // Remove leading "../" if present
   const cleanTarget = target.replace(/^\.\.\//, "");
   const baseDir = getSlideBaseDir(outputDir);
   return path.join(baseDir, cleanTarget);
 }
 
+/**
+ * Parse a layout XML file
+ */
+export async function parseLayoutXml(layoutPath: string): Promise<any> {
+  try {
+    const xmlData = await fs.readFile(layoutPath, "utf-8");
+    return parser.parse(xmlData);
+  } catch (error) {
+    console.error(`Error parsing layout XML: ${layoutPath}`, error);
+    return null;
+  }
+}
+
+/**
+ * Parse a master slide XML file
+ */
+export async function parseMasterSlideXml(masterPath: string): Promise<any> {
+  try {
+    const xmlData = await fs.readFile(masterPath, "utf-8");
+    return parser.parse(xmlData);
+  } catch (error) {
+    console.error(`Error parsing master slide XML: ${masterPath}`, error);
+    return null;
+  }
+}
+
+/**
+ * Parse a theme XML file
+ */
+export async function parseThemeXml(themePath: string): Promise<any> {
+  try {
+    const xmlData = await fs.readFile(themePath, "utf-8");
+    return parser.parse(xmlData);
+  } catch (error) {
+    console.error(`Error parsing theme XML: ${themePath}`, error);
+    return null;
+  }
+}
+
+/**
+ * Parse presentation XML file
+ */
+export async function parsePresentationXml(
+  presentationPath: string
+): Promise<any> {
+  try {
+    const xmlData = await fs.readFile(presentationPath, "utf-8");
+    return parser.parse(xmlData);
+  } catch (error) {
+    console.error(`Error parsing presentation XML: ${presentationPath}`, error);
+    return null;
+  }
+}
+
+/**
+ * Get layout XML path
+ */
+export function getLayoutXmlPath(
+  outputDir: string,
+  layoutName: string
+): string {
+  const baseDir = getSlideBaseDir(outputDir);
+  return path.join(baseDir, "slideLayouts", layoutName);
+}
+
+/**
+ * Get master slide XML path
+ */
+export function getMasterSlideXmlPath(
+  outputDir: string,
+  masterName: string = "slideMaster1.xml"
+): string {
+  const baseDir = getSlideBaseDir(outputDir);
+  return path.join(baseDir, "slideMasters", masterName);
+}
+
+/**
+ * Get theme XML path
+ */
+export function getThemeXmlPath(
+  outputDir: string,
+  themeName: string = "theme1.xml"
+): string {
+  const baseDir = getSlideBaseDir(outputDir);
+  return path.join(baseDir, "theme", themeName);
+}
+
+/**
+ * Get presentation XML path
+ */
+export function getPresentationXmlPath(outputDir: string): string {
+  const baseDir = getSlideBaseDir(outputDir);
+  return path.join(baseDir, "presentation.xml");
+}
