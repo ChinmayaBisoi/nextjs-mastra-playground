@@ -42,7 +42,7 @@ model Presentation {
 }
 
 model Template {
-  id           String   @id @default(cuid())
+  id           String           @id @default(cuid())
   userId       String
   name         String
   fileName     String
@@ -50,8 +50,25 @@ model Template {
   templateSpec Json
   slidesJson   Json?
   images       Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  layouts      TemplateLayout[]
 
   @@index([userId])
+}
+
+model TemplateLayout {
+  id         String   @id @default(cuid())
+  templateId String
+  template   Template @relation(fields: [templateId], onDelete: Cascade, references: [id])
+  layoutId   String // e.g., "1", "2" for slide numbers
+  layoutName String // e.g., "Slide1"
+  layoutCode String // React component code
+  html       String? // Original HTML
+  fonts      Json? // Array of font URLs
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([templateId, layoutId])
+  @@index([templateId])
 }

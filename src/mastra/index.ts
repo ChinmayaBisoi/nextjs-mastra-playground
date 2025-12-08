@@ -6,10 +6,17 @@ import { weatherWorkflow } from "./workflows/weather-workflow";
 import { weatherAgent } from "./agents/weather-agent";
 import { pptWorkflow } from "./workflows/ppt-workflow";
 import { pptOutlineAgent } from "./agents/ppt-outline-agent";
+import { htmlGeneratorAgent } from "./agents/html-generator-agent";
+import { reactGeneratorAgent } from "./agents/react-generator-agent";
 
 export const mastra = new Mastra({
   workflows: { weatherWorkflow, pptWorkflow },
-  agents: { weatherAgent, pptOutlineAgent },
+  agents: {
+    weatherAgent,
+    pptOutlineAgent,
+    "html-generator-agent": htmlGeneratorAgent,
+    "react-generator-agent": reactGeneratorAgent,
+  },
   storage: new LibSQLStore({
     // id: "mastra-storage",
     // stores observability, scores, ... into memory storage, if it needs to persist, change to file:../mastra.db

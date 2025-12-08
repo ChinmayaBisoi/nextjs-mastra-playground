@@ -51,3 +51,6 @@ next-env.d.ts
 
 # output
 /src/data/output/
+
+/src/output
+/v3-pptx2json
